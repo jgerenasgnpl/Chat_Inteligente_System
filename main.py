@@ -3,6 +3,8 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.endpoints import chat
+from app.api.deps import get_current_active_user  
+from app.core.auth import get_current_active_user
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
@@ -12,7 +14,14 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_prefix=settings.API_V1_STR
+)
+
+app.include_router(
+    chat.router,
+    prefix=f"{settings.API_V1_STR}/chat",
+    tags=["chat"],
+    dependencies=[Depends(get_current_active_user)]
 )
 
 # Configurar CORS
