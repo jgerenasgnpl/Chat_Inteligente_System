@@ -1,0 +1,183 @@
+initial:
+  message: |
+    Hola, soy asistente de Systemgroup. Estoy aquí para ayudarle con su obligación financiera. 
+    ¿En qué puedo asistirle hoy?
+  next: validar_documento
+validar_documento:
+  message: |
+    Para poder atenderle adecuadamente, necesito validar su identidad.
+    Por favor, indíqueme su número de documento.
+  action: "consultar_base_datos"
+  condition: "consulta_exitosa"
+  true_next: clasificar_cliente
+  false_next: sistema_actualizando
+metadatos:
+  sector: "Cobranza para entidades financieras y del sector real"
+  producto: "Créditos libre inversión, tarjetas o productos con financiación directa"
+  estrategia: "Recuperación de cartera castigada"
+  kpis:
+    - "% de recuperación"
+    - "% de compromiso de pago"
+    - "Reducción de días en mora"
+  variables_clave:
+    - "Mora castigada (mayor a 1000 días)"
+    - "Contacto inicial"
+    - "Posibilidad de negociación"
+    - "Mantener relación positiva con el cliente"   
+clasificar_cliente:
+  message: |
+    Gracias. Estamos procesando su información para ofrecerle la mejor solución para su caso.
+    Por favor, espere un momento mientras analizamos su historial.
+  action: "analizar_historial_cliente"
+  condition: "cliente_alto_riesgo"
+  true_next: informar_condiciones_especiales
+  false_next: clasificar_tipo_deuda
+informar_condiciones_especiales:
+  message: |
+    Hemos revisado tu perfil y notamos un historial irregular de pagos. 
+    Podemos ofrecerte una solución flexible para ayudarte a regularizar tu situación.
+  next: clasificar_tipo_deuda
+clasificar_tipo_deuda:
+  message: |
+    Estamos analizando los detalles de su obligación para determinar las mejores opciones de pago disponibles para usted.
+  condition: "cliente_con_deuda_antigua"
+  true_next: informar_deuda_antigua
+  false_next: informar_deuda
+informar_deuda_antigua:
+  message: "¡Hola, muy buenos días! ¿Hablo con {{nombre_cliente}}?"
+  next: verificar_identidad
+verificar_identidad:
+  condition: "cliente_confirma_identidad"
+  true_next: presentacion
+  false_next: manejar_evasivas
+manejar_evasivas:
+  condition: "tipo_evasiva"
+  options:
+    pregunta_quien_necesita:
+      message: "Le contactamos de Systemgroup, en calidad de apoderados o especialistas de cobro debidamente autorizados, en relación con una obligación financiera y esta es una comunicación de carácter pre-jurídico fundamental sobre el estado actual de dicha obligación."
+      next: verificar_identidad
+    pide_repetir:
+      message: "Confirmamos, ¿hablo con {{nombre_cliente}}?"
+      next: verificar_identidad
+presentacion:
+  message: "Gracias, {{nombre_cliente}}. Procedo a informarle que Systemgroup, tras el análisis de su obligación, cuyo saldo actual asciende a {{saldo_total}}, ha generado una oportunidad excepcional para la normalización jurídica y financiera de su situación mediante un acuerdo transaccional. con una propuesta de liquidación total con una condonación significativa. Pagando la suma de {{oferta_2}} usted podría finalizar la obligación principal."
+  next: evaluar_intencion_pago
+informar_deuda:
+  message: "Tienes un saldo pendiente de {{saldo_total}}. ¿Te gustaría que te proponga un acuerdo de pago?"
+  next: evaluar_intencion_pago
+evaluar_intencion_pago:
+  condition: "cliente_muestra_intencion"
+  true_next: generar_acuerdo
+  false_next: evaluar_motivo_no_pago
+evaluar_motivo_no_pago:
+  condition: "cliente_indica_motivo"
+  true_next: gestionar_objecion
+  false_next: cerrar_sin_pago
+gestionar_objecion:
+  action: "clasificar_objecion"
+  condition: "tipo_objecion"
+  options:
+    no_tiene_dinero:
+      message: "{{nombre_cliente}}, comprendo su situación financiera actual, sin embargo, la obligación persiste. Precisamente por ello, Systemgroup a través de nuestra gestión, ha autorizado una propuesta excepcional que le permite extinguir un saldo de {{saldo_total}} con el pago de tan solo {{oferta_2}}. No se trata de tener el monto total, sino de aprovechar esta oportunidad limitada de normalizar su situación jurídica y financiera a un valor considerablemente reducido, evitando así que la deuda siga acumulando intereses moratorios y gastos de cobranza."
+      next: ofrecer_pago_total_contado
+    paga_otras_deudas:
+      message: "{{nombre_cliente}}, si está priorizando otras obligaciones, es aún más imperativo que resuelva esta situación crítica. Esta deuda, con su antigüedad, no solo sigue causando intereses moratorios, sino que mantiene un reporte negativo que impacta su acceso al sistema financiero formal. La oferta exclusiva de liquidar un saldo de {{saldo_total}} pagando {{oferta_2}} le permite cerrar definitivamente este capítulo, mejorar su perfil crediticio a mediano plazo y evitar la escalada en los procesos de gestión de cobranza."
+      next: proponer_planes_pago
+    deuda_prescrita:
+      message: "{{nombre_cliente}}, es crucial aclarar que la prescripción de una obligación financiera en Colombia no opera de manera automática ni es una simple 'caducidad'. La obligación principal subsiste, y la acción para su cobro, aunque pueda verse afectada por el paso del tiempo, depende de múltiples factores legales, incluyendo posibles causales de interrupción o suspensión del término, y requiere ser alegada por el deudor y declarada por un juez en un proceso judicial. Nuestra gestión actual es extrajudicial, buscando precisamente evitar esa instancia."
+      next: proponer_planes_pago
+    no_disponible:
+      message: "{{nombre_cliente}}, entendemos que pueda tener compromisos, pero la formalización de este acuerdo no le tomará mayor tiempo y puede gestionarse remotamente. Podemos enviar el documento transaccional con los términos y las instrucciones de pago de manera inmediata a su WhatsApp. Usted podrá revisarlo y confirmar su compromiso sin importar su ubicación actual."
+      next: proponer_planes_pago
+    objecion_no_reconoce:
+      message: "Esta deuda corresponde a un compromiso adquirido con {{nombre_empresa}}. Si deseas, puedo enviarte el detalle completo para que lo revises."
+      next: confirmar_envio_detalle
+    objecion_ya_pague:
+      message: "Entiendo. ¿Podrías indicarme el número de comprobante o la fecha en que realizaste el pago para validarlo?"
+      next: verificar_documentacion
+mensaje_empatico:
+  condition: "cliente_muestra_frustracion"
+  message: "Entiendo que esta situación puede generar molestias. Estoy aquí para ayudarte a encontrar una solución viable."
+  next: proponer_planes_pago
+proponer_planes_pago:
+  action: "crear_planes_pago"
+  message: |
+    Te propongo estas opciones de pago para tu deuda de {{saldo_total}}:
+    1️⃣ Pago único con descuento de {{oferta_2}}.
+    2️⃣ Plan en 2 cuotas sin interés adicional.
+    3️⃣ Plan en 6 cuotas con un primer pago de {{pago_flexible}}.
+    ¿Cuál prefieres?
+  next: espera_eleccion_plan
+espera_eleccion_plan:
+  condition: "cliente_selecciona_plan"
+  true_next: confirmar_plan_elegido
+  false_next: reiterar_opciones_pago
+  timeout: 60
+  on_timeout: mensaje_reenganche
+mensaje_reenganche:
+  message: "¿Sigues ahí? Solo necesito que me indiques qué opción prefieres para continuar."
+  next: espera_eleccion_plan
+reiterar_opciones_pago:
+  message: "No entendí tu elección. Por favor, indícame si prefieres la opción 1 (pago único), 2 (dos cuotas) o 3 (seis cuotas)."
+  next: espera_eleccion_plan
+confirmar_plan_elegido:
+  action: "registrar_plan_pago"
+  message: "Perfecto. Entonces acordamos: Plan {{opcion}} con primer pago el {{fecha_primer_pago}}. Te enviaré el detalle por el canal que prefieras."
+  next: confirmar_contacto
+confirmar_contacto:
+  action: "verificar_contacto"
+  message: "¿Te envío el detalle al correo que termina en @gmail.com o prefieres por WhatsApp?"
+  next: generar_acuerdo
+generar_acuerdo:
+  condition: "cliente_muestra_frustracion"
+  true_next: mensaje_empatico
+  false_next: confirmar_pago_acuerdo
+verificar_documentacion:
+  action: "consultar_estado_tramite"
+  condition: "documentos_recibidos"
+  true_next: confirmar_recepcion_documentos
+  false_next: informar_no_recepcion_documentos
+confirmar_recepcion_documentos:
+  message: "Sí, hemos recibido tus documentos. El área encargada está revisando tu caso. Te notificaremos cualquier actualización."
+  next: fin
+informar_no_recepcion_documentos:
+  message: "Aún no registramos los documentos. ¿Podrías reenviarlos o indicarme aproximadamente cuándo los enviaste?"
+  next: fin
+cerrar_sin_pago:
+  condition: "razon_no_pago"
+  options:
+    temporalmente_imposible:
+      message: |
+        Agradezco que hayas tomado el tiempo para hablar conmigo. 
+        Si en algún momento deseas revisar tu deuda o necesitas ayuda, estaré disponible para apoyarte.
+        Que tengas un buen día.
+      next: fin
+    situacion_vulnerable:
+      message: |
+        Comprendo que estás enfrentando una situación difícil. Vamos a dejar constancia de tu caso para que no recibas más llamados por ahora. 
+        Te deseamos lo mejor y, si tu situación cambia, estaremos aquí para ayudarte.
+      next: fin
+    rechazo_total:
+      message: "{{nombre_cliente}}, entiendo su posición actual al rehusarse a formalizar un acuerdo extrajudicial en esta instancia, pero debo ser enfáticamente claro(a) sobre las implicaciones de su decisión: su negativa a pagar o acordar hoy no extingue la obligación que usted adquirió."
+      next: despedida_final
+despedida_final:
+  message: "Gracias por su tiempo. Recuerde, si no cumple con el pago, enfrentará el incremento de intereses moratorios y gastos de cobranza. Cualquier novedad con su pago, comuníquese a la brevedad con Systemgroup al número: 601 - 756 - 0385 (seiscientos uno, siete cincuenta y seis, cero tres ochenta y cinco). Hasta luego."
+  next: fin
+variables:
+  nombre_cliente: ""
+  saldo_total: ""
+  oferta_1: ""
+  oferta_2: ""
+  oferta_3: ""
+  pago_flexible: ""
+  oferta_seleccionada: ""
+  condiciones_acuerdo: ""
+  fecha_primer_pago: ""
+  fecha_ultimo_pago: ""
+  nombre_empresa: ""
+  opcion: ""
+  fecha: ""
+  canal_contacto: ""
+fin:
+  action: "finalizar_llamada"
+  message: "Gracias por tu tiempo. Hasta pronto."

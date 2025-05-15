@@ -6,7 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app import crud, models, schemas
+
+from app.crud import crud_user 
+from app.crud import crud_conversation 
+from app import models, schemas 
 
 # 1. Define de dónde sale el token
 oauth2_scheme = OAuth2PasswordBearer(
@@ -43,7 +46,7 @@ def get_current_user(
     security_scopes: SecurityScopes,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
-) -> models.User:
+) -> models.user:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="No se pudo validar las credenciales",
@@ -60,22 +63,22 @@ def get_current_user(
                 headers={"WWW-Authenticate": f'Bearer scope="{security_scopes.scope_str}"'},
             )
 
-    user = crud.user.get(db, id=int(token_data.sub))
+    user = crud_user.get(db, id=int(token_data.sub))
     if not user:
         raise credentials_exception
     return user
 
 def get_current_active_user(
-    current_user: models.User = Security(get_current_user, scopes=["read"])
-) -> models.User:
+    current_user: models.user = Security(get_current_user, scopes=["read"])
+) -> models.user:
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Usuario inactivo")
     return current_user
 
 # 5. Dependencia de admin (opcional)
 def get_current_active_admin(
-    current_user: models.User = Security(get_current_user, scopes=["write"])
-) -> models.User:
+    current_user: models.user = Security(get_current_user, scopes=["write"])
+) -> models.user:
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="No autorizado")
     return current_user

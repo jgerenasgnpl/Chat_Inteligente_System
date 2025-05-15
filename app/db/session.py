@@ -1,24 +1,37 @@
+# app/db/session.py
+import urllib.parse
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-from app.core.config import settings
+from app.db.base import Base
+# Importa tus modelos para que Base.metadata los conozca (aunque ya no creará tablas)
+from app.models.user import User
+from app.models.conversation import Conversation
+from app.models.message import Message
 
-# Crear la URI de conexión para SQL Server
-DATABASE_URI = (
-    f"mssql+pyodbc://{settings.SQLSERVER_USER}:{settings.SQLSERVER_PASSWORD}"
-    f"@{settings.SQLSERVER_SERVER}:{settings.SQLSERVER_PORT}/{settings.SQLSERVER_DB}"
-    "?driver=ODBC+Driver+17+for+SQL+Server"
+# Cadena ODBC
+odbc_str = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=172.18.79.20,1433;"
+    "DATABASE=turnosvirtuales_dev;"
+    "Trusted_Connection=yes;"
+)
+params = urllib.parse.quote_plus(odbc_str)
+
+# Engine
+engine = create_engine(
+    f"mssql+pyodbc:///?odbc_connect={params}",
+    pool_pre_ping=True
 )
 
-# Crear el motor de SQLAlchemy
-engine = create_engine(settings.DATABASE_URI, pool_pre_ping=True)
+# Session factory
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
 
-# Crear la sesión
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# Función para obtener una sesión de base de datos
+# Dependencia para FastAPI
 def get_db():
     db = SessionLocal()
     try:

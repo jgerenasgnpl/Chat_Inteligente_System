@@ -1,19 +1,18 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:14
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
     container_name: negotiation_chat_db
     volumes:
-      - postgres_data:/var/lib/postgresql/data/
+      - sqlserver_data:/var/opt/mssql
     env_file:
       - ./.env
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=${SQLSERVER_PASSWORD}
     ports:
-      - "5432:5432"
+      - "1433:1433"
     restart: always
     networks:
       - negotiation-network
@@ -29,11 +28,11 @@ services:
     env_file:
       - ./.env
     environment:
-      - POSTGRES_SERVER=postgres
+      - SQLSERVER_SERVER=sqlserver
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
+      - sqlserver
     restart: always
     networks:
       - negotiation-network
@@ -43,4 +42,4 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
+  sqlserver_data:

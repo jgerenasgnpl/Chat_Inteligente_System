@@ -9,6 +9,10 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
 
+import yaml
+with open("base_conocimiento.yaml", encoding="utf-8") as f:
+    kb = yaml.safe_load(f)
+
 class StateManager:
     """
     Gestiona el estado de las conversaciones en el sistema de negociación.
@@ -20,7 +24,7 @@ class StateManager:
         """
         Obtiene la conversación activa del usuario o crea una nueva si no existe.
         """
-        # Buscar conversación activa
+        # conversacion activa
         active_conversation = (
             db.query(Conversation)
             .filter(Conversation.user_id == user_id, Conversation.is_active == True)
@@ -30,16 +34,18 @@ class StateManager:
         if active_conversation:
             return active_conversation
         
-        # Crear nueva conversación si no hay una activa
+        # Crear nueva conversación
         if not title:
             title = f"Negociación {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             
         new_conversation = Conversation(
             user_id=user_id,
             title=title,
-            current_state="initial",
+            current_state="validar_documento",
             is_active=True
         )
+        
+        print(f"Creando nueva conversación con estado inicial: {new_conversation.current_state}")
         
         try:
             db.add(new_conversation)
@@ -74,7 +80,6 @@ class StateManager:
             conversation.current_state = new_state
             
             if context_data:
-                # Si ya existe contexto, actualizarlo
                 if conversation.context_data:
                     existing_context = conversation.context_data
                     existing_context.update(context_data)

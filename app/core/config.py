@@ -1,6 +1,7 @@
 import os
 from typing import Optional
-from pydantic import BaseSettings, validator
+from pydantic_settings import BaseSettings # <-- Importa BaseSettings desde el nuevo paquete
+from pydantic import validator # <-- Mantén esta línea si usas 'validator' de pydantic
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "NegotiationChat"
