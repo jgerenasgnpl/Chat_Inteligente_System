@@ -160,6 +160,51 @@ cerrar_sin_pago:
     rechazo_total:
       message: "{{nombre_cliente}}, entiendo su posición actual al rehusarse a formalizar un acuerdo extrajudicial en esta instancia, pero debo ser enfáticamente claro(a) sobre las implicaciones de su decisión: su negativa a pagar o acordar hoy no extingue la obligación que usted adquirió."
       next: despedida_final
+confirmar_pago_acuerdo:
+  message: |
+    Perfecto {{nombre_cliente}}. Tu deuda actual es de {{saldo_total}}.
+    Tenemos estas opciones especiales para ti:
+    💰 Opción 1: Pago único con 70% de descuento: {{oferta_1}}
+    📅 Opción 2: Plan de 2 cuotas: {{cuota_dos}} cada una
+    🎯 Opción 3: Plan flexible de 6 cuotas: Primera cuota {{cuota_seis}}
+    ¿Cuál te conviene más?
+  action: "crear_planes_pago"
+  condition: "cliente_selecciona_plan"
+  true_next: confirmar_plan_elegido
+  false_next: reiterar_opciones_pago
+ofrecer_pago_total_contado:
+  message: |
+    {{nombre_cliente}}, considerando su situación, le ofrezco una oportunidad única:
+    ✨ **OFERTA ESPECIAL DE HOY**
+    💸 Saldo actual: {{saldo_total}}
+    🎉 Pago de contado: {{oferta_1}} (¡Ahorra más del 60%!)
+    Esta oferta es válida solo por 24 horas. ¿Podemos proceder con el acuerdo?
+  next: evaluar_respuesta_oferta
+evaluar_respuesta_oferta:
+  condition: "cliente_muestra_intencion"
+  true_next: generar_acuerdo
+  false_next: proponer_planes_pago
+confirmar_envio_detalle:
+  message: |
+    Te voy a enviar el detalle completo de tu obligación con {{nombre_empresa}}:
+    📄 Número de obligación: {{numero_obligacion}}
+    💰 Capital: {{capital}}
+    📈 Intereses: {{intereses}}
+    💯 Total: {{saldo_total}}
+    ¿Te lo envío por WhatsApp o email?
+  action: "verificar_contacto"
+  next: generar_acuerdo
+consultar_deuda_directa:
+  message: |
+    {{nombre_cliente}}, tu situación actual es:
+    🏛️ Entidad: {{banco}}
+    📄 Producto: {{producto}}
+    💰 Saldo total: {{saldo_total}}
+    📊 Capital: {{capital}}
+    📈 Intereses y gastos: {{intereses}} 
+    Pero tengo excelentes noticias para ti... ¿Te interesa conocer nuestras opciones de pago?
+  action: "analizar_historial_cliente"
+  next: proponer_planes_pago
 despedida_final:
   message: "Gracias por su tiempo. Recuerde, si no cumple con el pago, enfrentará el incremento de intereses moratorios y gastos de cobranza. Cualquier novedad con su pago, comuníquese a la brevedad con Systemgroup al número: 601 - 756 - 0385 (seiscientos uno, siete cincuenta y seis, cero tres ochenta y cinco). Hasta luego."
   next: fin

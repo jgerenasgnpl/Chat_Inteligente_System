@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 import httpx
 
 from app.api.endpoints import chat
+# from app.api.endpoints import admin_config  # Descomentar cuando esté listo
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
@@ -14,16 +15,16 @@ from app.db.session import engine
 # Crear tablas
 Base.metadata.create_all(bind=engine)
 
-# Logger de Uvicorn para capturar errores
+# Uvicorn captura errores
 logger = logging.getLogger("uvicorn.error")
 
-# Instancia de FastAPI
+# FastAPI
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_prefix=settings.API_V1_STR
 )
 
-# Manejador para errores no controlados
+# errores no controlados
 @app.exception_handler(Exception)
 async def all_exception_handler(request: Request, exc: Exception):
     logger.exception(f"Error no controlado: {exc}")
@@ -36,7 +37,6 @@ async def all_exception_handler(request: Request, exc: Exception):
 def read_test():
     return {"message": "Test desde main.py"}
 
-
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.warning(f"Validación fallida: {exc.errors()}")
@@ -44,7 +44,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=422,
         content={"detail": exc.errors()}
     )
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,12 +53,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+# RUTAS PRINCIPALES
 app.include_router(
     chat.router,
-    prefix=f"{settings.API_V1_STR}/chat",
-    tags=["chat"]
+    prefix="/api/v1"
 )
+
+# RUTAS DE ADMINISTRACIÓN (descomentar cuando estén listas)
+# app.include_router(
+#     admin_config.router,
+#     prefix=f"{settings.API_V1_STR}/admin",
+#     tags=["admin"]
+# )
 
 @app.post("/api/v1/api/v1/chat/message")
 async def legacy_message_endpoint(request: Request):
@@ -80,7 +85,21 @@ async def legacy_message_endpoint(request: Request):
     
 @app.get("/")
 def read_root():
-    return {"message": "Bienvenido a la API de Negociacion Chat"}
+    return {"message": "Bienvenido a la API de Negociacion Chat - Versión ML Integrada"}
+
+@app.get("/health")
+def health_check():
+    """Endpoint de salud del sistema"""
+    return {
+        "status": "healthy",
+        "version": "2.0.0-ml",
+        "features": [
+            "chat_hibrido_ml",
+            "configuracion_dinamica", 
+            "migracion_yaml_sql",
+            "monitoreo_metricas"
+        ]
+    }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
