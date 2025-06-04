@@ -9,11 +9,23 @@ import httpx
 from app.api.endpoints import chat
 # from app.api.endpoints import admin_config  # Descomentar cuando esté listo
 from app.core.config import settings
-from app.db.base import Base
-from app.db.session import engine
 
-# Crear tablas
-Base.metadata.create_all(bind=engine)
+# ✅ IMPORTACIONES SEGURAS DE DB
+from app.db.session import test_connection, create_tables
+
+# ✅ PROBAR CONEXIÓN ANTES DE INICIALIZAR FASTAPI
+print("🔍 Verificando conexión a base de datos...")
+if not test_connection():
+    print("❌ No se pudo conectar a la base de datos. Verificar configuración.")
+    exit(1)
+
+# ✅ CREAR TABLAS DE FORMA SEGURA
+print("📋 Verificando/creando tablas...")
+try:
+    create_tables()
+except Exception as e:
+    print(f"❌ Error con las tablas: {e}")
+    print("⚠️ Continuando sin crear tablas (pueden existir)")
 
 # Uvicorn captura errores
 logger = logging.getLogger("uvicorn.error")
@@ -56,7 +68,8 @@ app.add_middleware(
 # RUTAS PRINCIPALES
 app.include_router(
     chat.router,
-    prefix="/api/v1"
+    prefix="/api/v1",
+    tags=["chat"]
 )
 
 # RUTAS DE ADMINISTRACIÓN (descomentar cuando estén listas)
@@ -98,7 +111,8 @@ def health_check():
             "configuracion_dinamica", 
             "migracion_yaml_sql",
             "monitoreo_metricas"
-        ]
+        ],
+        "database": "connected" if test_connection() else "error"
     }
 
 if __name__ == "__main__":

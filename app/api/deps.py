@@ -7,8 +7,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 
-from app.crud import crud_user 
-from app.crud import crud_conversation 
 from app import models, schemas 
 
 # 1. Define de dónde sale el token
@@ -62,11 +60,6 @@ def get_current_user(
                 detail="No tiene permisos suficientes",
                 headers={"WWW-Authenticate": f'Bearer scope="{security_scopes.scope_str}"'},
             )
-
-    user = crud_user.get(db, id=int(token_data.sub))
-    if not user:
-        raise credentials_exception
-    return user
 
 def get_current_active_user(
     current_user: models.user = Security(get_current_user, scopes=["read"])

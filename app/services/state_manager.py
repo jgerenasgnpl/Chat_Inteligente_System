@@ -10,8 +10,11 @@ from app.models.message import Message
 from app.models.user import User
 
 import yaml
-with open("base_conocimiento.yaml", encoding="utf-8") as f:
-    kb = yaml.safe_load(f)
+try:
+    with open("base_conocimiento.yaml", encoding="utf-8") as f:
+        kb = yaml.safe_load(f)
+except:
+    kb = {}
 
 class StateManager:
     """
@@ -40,7 +43,6 @@ class StateManager:
             
         new_conversation = Conversation(
             user_id=user_id,
-            title=title,
             current_state="validar_documento",
             is_active=True
         )
@@ -68,6 +70,7 @@ class StateManager:
     ) -> Conversation:
         """
         Actualiza el estado de una conversación y opcionalmente su contexto.
+        ✅ VERSIÓN CORREGIDA CON MANEJO JSON SEGURO
         """
         conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
         if not conversation:
@@ -77,24 +80,67 @@ class StateManager:
             )
         
         try:
+            # Actualizar estado
             conversation.current_state = new_state
             
+            # ✅ MANEJO SEGURO DEL CONTEXTO
             if context_data:
-                if conversation.context_data:
-                    existing_context = conversation.context_data
+                existing_context = {}
+                
+                # Obtener contexto existente de forma segura
+                if hasattr(conversation, 'context_data') and conversation.context_data:
+                    if isinstance(conversation.context_data, dict):
+                        existing_context = conversation.context_data.copy()
+                    elif isinstance(conversation.context_data, str):
+                        try:
+                            existing_context = json.loads(conversation.context_data)
+                        except Exception as e:
+                            print(f"⚠️ Error parseando contexto existente: {e}")
+                            existing_context = {}
+                    else:
+                        existing_context = {}
+                
+                # Actualizar contexto con nuevos datos
+                if isinstance(context_data, dict):
                     existing_context.update(context_data)
-                    conversation.context_data = existing_context
+                    
+                    # ✅ CONVERTIR A JSON STRING ANTES DE GUARDAR
+                    try:
+                        json_context = json.dumps(existing_context, ensure_ascii=False, default=str)
+                        conversation.context_data = json_context
+                        print(f"💾 Contexto guardado como JSON: {len(existing_context)} elementos")
+                    except Exception as e:
+                        print(f"❌ Error convirtiendo contexto a JSON: {e}")
+                        # Fallback: guardar como string simple
+                        conversation.context_data = str(existing_context)
                 else:
-                    conversation.context_data = context_data
+                    # Si context_data no es dict, intentar convertirlo
+                    try:
+                        json_context = json.dumps(context_data, ensure_ascii=False, default=str)
+                        conversation.context_data = json_context
+                    except:
+                        conversation.context_data = str(context_data)
             
             db.commit()
             db.refresh(conversation)
+            print(f"✅ Estado actualizado: {conversation.current_state}")
             return conversation
+            
         except SQLAlchemyError as e:
             db.rollback()
+            error_msg = f"Error al actualizar estado: {str(e)}"
+            print(f"❌ {error_msg}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error al actualizar estado: {str(e)}"
+                detail=error_msg
+            )
+        except Exception as e:
+            db.rollback()
+            error_msg = f"Error inesperado: {str(e)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=error_msg
             )
     
     @staticmethod
@@ -135,3 +181,22 @@ class StateManager:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error al finalizar conversación: {str(e)}"
             )
+    
+    @staticmethod
+    def safe_get_context_data(conversation: Conversation) -> Dict[str, Any]:
+        """
+        Obtiene context_data como diccionario de forma segura
+        """
+        try:
+            if hasattr(conversation, 'context_data') and conversation.context_data:
+                if isinstance(conversation.context_data, dict):
+                    return conversation.context_data
+                elif isinstance(conversation.context_data, str):
+                    return json.loads(conversation.context_data)
+                else:
+                    return {}
+            else:
+                return {}
+        except Exception as e:
+            print(f"⚠️ Error obteniendo contexto: {e}")
+            return {}

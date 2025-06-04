@@ -1,8 +1,3 @@
-# app/services/acciones_service.py
-"""
-Servicio para ejecutar acciones de negocio
-"""
-
 import logging
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session

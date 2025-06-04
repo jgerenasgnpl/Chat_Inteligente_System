@@ -8,6 +8,7 @@ class ChatRequest(BaseModel):
     text: Optional[str] = None  # Para compatibilidad
     conversation_id: Optional[int] = None
     button_selected: Optional[str] = None
+    intention: Optional[str] = None
 
 class ButtonOption(BaseModel):
     id: str

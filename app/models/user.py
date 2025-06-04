@@ -1,18 +1,21 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
-from sqlalchemy.sql import func
+# app/models/users.py - GENERADO AUTOMÁTICAMENTE
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
-
 from app.db.base import Base
 
 class User(Base):
     __tablename__ = "users"
-
+    
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    full_name = Column(String, index=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
+    email = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255))
+    is_active = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime)
+    
     conversations = relationship("Conversation", back_populates="user")
+    
+    def __repr__(self):
+        id_field = getattr(self, 'id', 'N/A')
+        return f"<User(id={id_field})>"

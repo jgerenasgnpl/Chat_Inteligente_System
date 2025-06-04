@@ -1,8 +1,3 @@
-# app/services/condiciones_service.py
-"""
-Servicio para evaluar condiciones de negocio
-"""
-
 import logging
 from typing import Dict, Any, Optional
 

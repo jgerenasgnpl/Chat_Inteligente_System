@@ -7,6 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 import joblib
 import re
+from sqlalchemy import text
 from typing import Dict, List, Tuple
 from datetime import datetime
 import json
