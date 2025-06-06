@@ -8,9 +8,86 @@ from app.models.conversation import Conversation
 from app.services.variable_service import crear_variable_service
 from app.services.flow_manager import ConfigurableFlowManagerAdaptado
 from app.services.nlp_service import SimpleNLPService
+import time
 
+# ==========================================
+# CACHE GLOBAL PARA CONTEXTOS
+# ==========================================
+CONTEXT_CACHE = {}
+CACHE_TIMEOUT = 3600  # 1 hora
 
 logger = logging.getLogger(__name__)
+
+def guardar_contexto_con_cache(conversation_id: int, contexto: Dict[str, Any], db: Session):
+    """Guardar contexto en cache Y en BD"""
+    global CONTEXT_CACHE
+    
+    # 1. Cache en memoria PRIMERO
+    CONTEXT_CACHE[conversation_id] = {
+        'contexto': contexto,
+        'timestamp': time.time()
+    }
+    
+    print(f"💾 Contexto guardado en cache: {conversation_id}")
+    
+    # 2. También guardar en BD como backup
+    try:
+        # Buscar conversación existente
+        conversation = db.query(Conversation).filter(
+            Conversation.id == conversation_id
+        ).first()
+        
+        if conversation:
+            # Convertir contexto a JSON string
+            contexto_json = json.dumps(contexto) if isinstance(contexto, dict) else str(contexto)
+            conversation.context = contexto_json
+            db.commit()
+            print(f"💾 Contexto también guardado en BD")
+        
+    except Exception as e:
+        print(f"⚠️ Error guardando en BD: {e}")
+
+def recuperar_contexto_con_cache(conversation_id: int, db: Session = None) -> Dict[str, Any]:
+    """Recuperar contexto desde cache PRIMERO, luego BD"""
+    global CONTEXT_CACHE
+    
+    # 1. Intentar desde cache (más rápido)
+    if conversation_id in CONTEXT_CACHE:
+        cached = CONTEXT_CACHE[conversation_id]
+        if time.time() - cached['timestamp'] < CACHE_TIMEOUT:
+            print(f"✅ Contexto recuperado desde CACHE")
+            return cached['contexto']
+        else:
+            # Cache expirado, eliminar
+            del CONTEXT_CACHE[conversation_id]
+    
+    # 2. Intentar desde BD si hay db disponible
+    if db:
+        try:
+            conversation = db.query(Conversation).filter(
+                Conversation.id == conversation_id
+            ).first()
+            
+            if conversation and conversation.context:
+                # Convertir de JSON string a dict
+                if isinstance(conversation.context, str):
+                    contexto = json.loads(conversation.context)
+                else:
+                    contexto = conversation.context or {}
+                
+                # Actualizar cache
+                CONTEXT_CACHE[conversation_id] = {
+                    'contexto': contexto,
+                    'timestamp': time.time()
+                }
+                print(f"✅ Contexto recuperado desde BD y cacheado")
+                return contexto
+                
+        except Exception as e:
+            print(f"⚠️ Error recuperando desde BD: {e}")
+    
+    print(f"📋 No hay contexto para conversación {conversation_id}")
+    return {}
 
 class ConversationService:
     """Servicio principal para manejar conversaciones del chatbot"""
@@ -18,7 +95,7 @@ class ConversationService:
     def __init__(self, db: Session):
         self.db = db
         self.variable_service = crear_variable_service(db)
-        self.flow_manager = ConfigurableFlowManagerAdaptado(db)  # ✅ CORREGIDO - Pasar db
+        self.flow_manager = ConfigurableFlowManagerAdaptado(db)
         self.intention_classifier = SimpleNLPService()
         
         logger.info("✅ ConversationService inicializado")
@@ -26,20 +103,19 @@ class ConversationService:
     async def process_message(self, conversation_id: int, user_message: str, user_id: int) -> Dict:
         """
         Procesa un mensaje del usuario y genera respuesta
-        
-        Args:
-            conversation_id: ID de la conversación
-            user_message: Mensaje del usuario
-            user_id: ID del usuario
-            
-        Returns:
-            Dict con respuesta, estado, contexto y botones
         """
         try:
             logger.info(f"📩 Procesando mensaje: '{user_message}' para conversación {conversation_id}")
             
             # Obtener o crear conversación
             conversation = self.get_or_create_conversation(conversation_id, user_id)
+            
+            # ✅ USAR CACHE PARA RECUPERAR CONTEXTO
+            contexto_cache = recuperar_contexto_con_cache(conversation_id, self.db)
+            if contexto_cache:
+                print(f"🔧 Contexto desde cache aplicado")
+                # Aplicar contexto del cache a la conversación
+                conversation.context = json.dumps(contexto_cache)
             
             logger.info(f"💬 Conversación {conversation_id} - Estado actual: {conversation.current_state}")
             logger.info(f"📋 Contexto actual: {conversation.context}")
@@ -68,9 +144,9 @@ class ConversationService:
             conversation.last_message = user_message
             conversation.response = response_con_variables
             
-            # Actualizar contexto si hay cambios
+            # ✅ ACTUALIZAR CONTEXTO CON CACHE
             if transition_result.get("context_updates"):
-                self._update_conversation_context(conversation, transition_result["context_updates"])
+                self._update_conversation_context_with_cache(conversation, transition_result["context_updates"])
             
             self.db.commit()
             
@@ -98,6 +174,11 @@ class ConversationService:
         """Procesar mensaje con intención específica del botón"""
         try:
             conversation = self.get_or_create_conversation(conversation_id, user_id)
+            
+            # ✅ USAR CACHE PARA CONTEXTO
+            contexto_cache = recuperar_contexto_con_cache(conversation_id, self.db)
+            if contexto_cache:
+                conversation.context = json.dumps(contexto_cache)
             
             logger.info(f"🎯 Procesando con intención específica: {intention}")
             
@@ -145,12 +226,12 @@ class ConversationService:
             ).first()
             
             if not conversation:
-                # Crear nueva conversación sin referencias a User por ahora
+                # Crear nueva conversación
                 conversation = Conversation(
                     id=conversation_id,
                     user_id=user_id,
                     current_state="inicial",
-                    context="[]",
+                    context="{}",  # JSON vacío válido
                     last_message="",
                     response=""
                 )
@@ -243,14 +324,20 @@ class ConversationService:
             
             logger.info(f"🤖 ML Analysis: {intention} (confianza: {confidence:.2f})")
             
-            # Determinar transición basada en intención
-            if intention == "proponer_planes_pago" and confidence > 0.7:
+            # ✅ USAR UMBRALES MÁS BAJOS TEMPORALMENTE
+            if intention == "SOLICITUD_PLAN" and confidence > 0.25:  # Bajado de 0.7 a 0.25
                 return {
                     "new_state": "proponer_planes_pago",
                     "trigger": "solicitar_opciones",
                     "context_updates": {}
                 }
-            elif intention == "confirmar_acuerdo" and confidence > 0.7:
+            elif intention == "INTENCION_PAGO" and confidence > 0.25:  # Bajado de 0.7 a 0.25
+                return {
+                    "new_state": "proponer_planes_pago",
+                    "trigger": "solicitar_opciones",
+                    "context_updates": {}
+                }
+            elif intention == "CONFIRMACION" and confidence > 0.25:  # Bajado de 0.7 a 0.25
                 return {
                     "new_state": "generar_acuerdo",
                     "trigger": "confirmar_plan",
@@ -307,8 +394,28 @@ class ConversationService:
             logger.error(f"❌ Error consultando cliente {cedula}: {e}")
             return None
     
+    def _update_conversation_context_with_cache(self, conversation: Conversation, updates: Dict):
+        """✅ NUEVA - Actualiza contexto usando cache"""
+        try:
+            # Cargar contexto actual (desde cache o BD)
+            current_context = recuperar_contexto_con_cache(conversation.id, self.db)
+            
+            # Aplicar actualizaciones
+            current_context.update(updates)
+            
+            # Guardar en cache Y BD
+            guardar_contexto_con_cache(conversation.id, current_context, self.db)
+            
+            # También actualizar el objeto conversation
+            conversation.context = json.dumps(current_context)
+            
+            logger.info(f"📋 Contexto actualizado con cache: {list(updates.keys())}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error actualizando contexto con cache: {e}")
+    
     def _update_conversation_context(self, conversation: Conversation, updates: Dict):
-        """Actualiza el contexto de la conversación"""
+        """Actualiza el contexto de la conversación - MÉTODO ORIGINAL"""
         try:
             # Cargar contexto actual
             current_context = json.loads(conversation.context) if conversation.context else {}

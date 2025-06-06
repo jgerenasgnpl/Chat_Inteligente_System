@@ -10,6 +10,7 @@ from sqlalchemy import text
 from datetime import datetime
 from functools import lru_cache
 
+
 # ✅ IMPORTS CORREGIDOS PARA ML
 try:
     from app.machine_learning.ml_service_adaptado import MLConversationEngineAdaptado
@@ -37,7 +38,7 @@ def load_knowledge_base():
         return {}
 
 class ConfigurableFlowManagerAdaptado:
-    """FlowManager adaptado a la estructura de BD existente - VERSIÓN LIMPIA"""
+    """FlowManager adaptado a la estructura de BD existente - VERSIÓN LIMPIA CORREGIDA"""
     
     _instance = None
     _lock = threading.Lock()
@@ -84,9 +85,25 @@ class ConfigurableFlowManagerAdaptado:
     # MÉTODOS PRINCIPALES
     # ================================================================================
     
-    def process_user_message(self, conversation_id: int, user_message: str, 
+    def process_user_message(self, conversation_i: int, user_message: str, 
                            current_state: str, context_data: dict) -> dict:
         """Procesar mensaje con detección automática de cédula y ML"""
+        cedula_match = re.search(r'\b(\d{8,12})\b', user_message)
+        if cedula_match:
+            cedula_nueva = cedula_match.group(1)
+            cedula_actual = context_data.get("cedula_detectada")
+            
+            # Si es diferente, LIMPIAR contexto y buscar nuevo cliente
+            if cedula_actual and cedula_nueva != cedula_actual:
+                print(f"🚨 Cambio de cliente: {cedula_actual} → {cedula_nueva}")
+                context_data = {"cedula_detectada": cedula_nueva}  # LIMPIAR
+                
+                # FORZAR nueva consulta
+                datos_nuevo_cliente = self._consultar_cliente_por_cedula(cedula_nueva)
+                if datos_nuevo_cliente.get("cliente_encontrado"):
+                    context_data.update(datos_nuevo_cliente)
+                    print(f"✅ Nuevo cliente cargado: {datos_nuevo_cliente.get('Nombre_del_cliente')}")
+
         try:
             print(f"🔍 Procesando mensaje: '{user_message}' en estado: {current_state}")
             
@@ -113,19 +130,61 @@ class ConfigurableFlowManagerAdaptado:
             return self._create_emergency_fallback(context_data)
 
     def _procesar_mensaje_con_cedula(self, cedula: str, context_data: dict, current_state: str) -> dict:
-        """Procesar cuando se detecta cédula en el mensaje"""
+        """Procesar cuando se detecta cédula en el mensaje - VERSIÓN CORREGIDA"""
         try:
             print(f"📋 Cédula detectada: {cedula}")
             
-            # Buscar cliente en BD
+            # ✅ VERIFICAR SI YA TENEMOS DATOS DEL CLIENTE EN CONTEXTO
+            if context_data and context_data.get("cliente_encontrado") and context_data.get("Nombre_del_cliente"):
+                print(f"🔄 Cliente ya en contexto: {context_data.get('Nombre_del_cliente')}")
+                
+                # Si ya tenemos datos, solo actualizar cédula si es diferente
+                if context_data.get("cedula_detectada") != cedula:
+                    context_data["cedula_detectada"] = cedula
+                    print(f"🔧 Cédula actualizada en contexto existente")
+                
+                # Respuesta con datos existentes
+                nombre = context_data.get('Nombre_del_cliente', 'Cliente')
+                saldo = self._format_currency(context_data.get('saldo_total', 0))
+                banco = context_data.get('banco', 'tu entidad financiera')
+                
+                response_message = f"""¡Perfecto, {nombre}! 
+                
+Tienes tu información ya cargada en nuestro sistema:
+
+💼 **Entidad:** {banco}
+💰 **Saldo actual:** {saldo}
+📋 **Estado:** Activo para negociación
+
+¿Te gustaría conocer las opciones especiales que tenemos disponibles para ti?"""
+                
+                buttons = [
+                    {"id": "si", "text": "Sí, quiero conocer las opciones", "value": "acepta"},
+                    {"id": "info", "text": "Primero quiero más información", "value": "mas_info"}
+                ]
+                
+                return {
+                    "next_state": "informar_deuda",
+                    "message": response_message,
+                    "buttons": buttons,
+                    "context_data": context_data,  # ✅ MANTENER CONTEXTO EXISTENTE
+                    "success": True,
+                    "datos_cliente_encontrados": True
+                }
+            
+            # ✅ SI NO HAY DATOS, BUSCAR EN BD
             datos_cliente = self._consultar_cliente_por_cedula(cedula)
             
             if datos_cliente and datos_cliente.get("cliente_encontrado", False):
                 print(f"✅ Cliente encontrado: {datos_cliente.get('Nombre_del_cliente')}")
                 
-                # Actualizar contexto completo
-                context_data.update(datos_cliente)
-                context_data["documento_cliente"] = cedula
+                # ✅ COMBINAR CON CONTEXTO EXISTENTE
+                if context_data:
+                    context_data.update(datos_cliente)
+                else:
+                    context_data = datos_cliente.copy()
+                
+                context_data["cedula_detectada"] = cedula
                 context_data["cliente_encontrado"] = True
                 
                 # Transición a informar_deuda
@@ -155,7 +214,10 @@ Encontré tu información en nuestro sistema:
                 print(f"❌ Cliente con cédula {cedula} NO encontrado")
                 
                 # Cliente no encontrado
-                context_data["documento_cliente"] = cedula
+                if not context_data:
+                    context_data = {}
+                
+                context_data["cedula_detectada"] = cedula
                 context_data["cliente_encontrado"] = False
                 
                 next_state = "cliente_no_encontrado"
@@ -188,6 +250,8 @@ Esto puede ocurrir si:
             
         except Exception as e:
             print(f"❌ Error procesando cédula {cedula}: {e}")
+            import traceback
+            traceback.print_exc()
             return self._create_emergency_fallback(context_data)
 
     def _procesar_con_ml(self, mensaje: str, context_data: dict, estado_actual: str) -> dict:
@@ -336,7 +400,7 @@ Esto puede ocurrir si:
         return any(casos_sospechosos)
 
     def _consultar_cliente_por_cedula(self, cedula: str) -> dict:
-        """Consultar cliente en ConsolidadoCampañasNatalia"""
+        """Consultar cliente en ConsolidadoCampañasNatalia - VERSIÓN MEJORADA"""
         try:
             print(f"🔍 Consultando cliente con cédula: {cedula}")
             
@@ -345,7 +409,8 @@ Esto puede ocurrir si:
                     Nombre_del_cliente, Cedula, Telefono, Email,
                     Saldo_total, Capital, Intereses, 
                     Oferta_1, Oferta_2, Oferta_3, Oferta_4,
-                    banco, Producto, NumerodeObligacion, Campaña
+                    banco, Producto, NumerodeObligacion, Campaña,
+                    Hasta_3_cuotas, Hasta_6_cuotas, Hasta_12_cuotas, Hasta_18_cuotas
                 FROM ConsolidadoCampañasNatalia 
                 WHERE CAST(Cedula AS VARCHAR) = :cedula
                 AND Saldo_total > 0
@@ -357,7 +422,7 @@ Esto puede ocurrir si:
             if result:
                 datos = {
                     "Nombre_del_cliente": result[0] or "Cliente",
-                    "documento_cliente": result[1] or cedula,
+                    "cedula_detectada": result[1] or cedula,
                     "telefono": result[2] or "No registrado",
                     "email": result[3] or "No registrado",
                     "saldo_total": float(result[4]) if result[4] else 0,
@@ -371,20 +436,26 @@ Esto puede ocurrir si:
                     "producto": result[12] or "Producto Financiero",
                     "numero_obligacion": result[13] or "N/A",
                     "campana": result[14] or "General",
+                    "hasta_3_cuotas": float(result[15]) if result[15] else 0,
+                    "hasta_6_cuotas": float(result[16]) if result[16] else 0,
+                    "hasta_12_cuotas": float(result[17]) if result[17] else 0,
+                    "hasta_18_cuotas": float(result[18]) if result[18] else 0,
                     "cliente_encontrado": True
                 }
                 
                 print(f"✅ Cliente encontrado: {datos['Nombre_del_cliente']} - Saldo: ${datos['saldo_total']:,.0f}")
+                print(f"💰 Ofertas: 1=${datos['oferta_1']:,.0f}, 2=${datos['oferta_2']:,.0f}")
+                print(f"📅 Cuotas: 3=${datos['hasta_3_cuotas']:,.0f}, 6=${datos['hasta_6_cuotas']:,.0f}")
                 return datos
             else:
                 print(f"❌ Cliente con cédula {cedula} no encontrado")
-                return {"cliente_encontrado": False, "documento_cliente": cedula}
+                return {"cliente_encontrado": False, "cedula_detectada": cedula}
                 
         except Exception as e:
             print(f"❌ Error consultando cliente {cedula}: {e}")
             import traceback
             traceback.print_exc()
-            return {"cliente_encontrado": False, "error": str(e), "documento_cliente": cedula}
+            return {"cliente_encontrado": False, "error": str(e), "cedula_detectada": cedula}
 
     # ================================================================================
     # CONFIGURACIÓN Y TRANSICIONES
@@ -440,36 +511,88 @@ Esto puede ocurrir si:
             return self._load_emergency_config()
 
     def _evaluate_transitions_adaptadas(self, config: dict, current_state: str, 
-                                      user_message: str, context_data: dict) -> str:
-        """Evaluar transiciones adaptadas"""
+                                    user_message: str, context_data: dict) -> str:
+        """Evaluar transiciones adaptadas - VERSIÓN CORREGIDA CON MÁS ESTADOS"""
         try:
-            # Lógica específica para estados conocidos
+            message_lower = user_message.lower()
+            
+            # ✅ VALIDAR DOCUMENTO
             if current_state == "validar_documento":
                 cedula = self._detectar_cedula(user_message)
                 if cedula:
                     return "informar_deuda" if context_data.get("cliente_encontrado") else "cliente_no_encontrado"
                 return current_state
             
+            # ✅ INFORMAR DEUDA  
             elif current_state == "informar_deuda":
-                message_lower = user_message.lower()
                 if any(word in message_lower for word in ["si", "sí", "acepto", "ok", "quiero", "opciones"]):
                     return "proponer_planes_pago"
                 elif any(word in message_lower for word in ["no", "despues", "luego", "más tarde"]):
                     return "gestionar_objecion"
+                elif any(word in message_lower for word in ["pago", "cuota", "plan"]):
+                    return "proponer_planes_pago"
                 return current_state
             
+            # ✅ PROPONER PLANES DE PAGO
             elif current_state == "proponer_planes_pago":
-                message_lower = user_message.lower()
                 if any(word in message_lower for word in ["1", "uno", "primer", "único", "pago único"]):
                     context_data["plan_seleccionado"] = "pago_unico"
                     return "generar_acuerdo"
                 elif any(word in message_lower for word in ["2", "dos", "segundo", "cuotas", "plan"]):
                     context_data["plan_seleccionado"] = "plan_cuotas"
-                    return "generar_acuerdo"
+                    return "seleccionar_plan"
+                elif any(word in message_lower for word in ["3", "tres", "tercer", "6 cuotas"]):
+                    context_data["plan_seleccionado"] = "plan_6_cuotas"
+                    return "seleccionar_plan"
                 elif any(word in message_lower for word in ["si", "sí", "acepto", "me interesa"]):
                     return "seleccionar_plan"
+                elif any(word in message_lower for word in ["tiempo", "esperar", "pensarlo"]):
+                    return "evaluar_intencion_pago"
                 return current_state
             
+            # ✅ SELECCIONAR PLAN (NUEVO)
+            elif current_state == "seleccionar_plan":
+                if any(word in message_lower for word in ["confirmo", "acepto", "si", "sí", "ok"]):
+                    return "generar_acuerdo"
+                elif any(word in message_lower for word in ["2", "dos", "cuotas"]):
+                    context_data["plan_seleccionado"] = "plan_2_cuotas"
+                    return "generar_acuerdo"
+                elif any(word in message_lower for word in ["6", "seis"]):
+                    context_data["plan_seleccionado"] = "plan_6_cuotas"  
+                    return "generar_acuerdo"
+                elif any(word in message_lower for word in ["pago", "único", "contado"]):
+                    context_data["plan_seleccionado"] = "pago_unico"
+                    return "generar_acuerdo"
+                # Si detecta cédula, regresar a informar deuda
+                elif self._detectar_cedula(user_message):
+                    return "informar_deuda"
+                return current_state
+            
+            # ✅ EVALUAR INTENCIÓN DE PAGO
+            elif current_state == "evaluar_intencion_pago":
+                if any(word in message_lower for word in ["si", "sí", "acepto", "quiero"]):
+                    return "proponer_planes_pago"
+                elif any(word in message_lower for word in ["no", "después", "luego"]):
+                    return "gestionar_objecion"
+                return "proponer_planes_pago"  # Por defecto mostrar opciones
+            
+            # ✅ GESTIONAR OBJECIÓN
+            elif current_state == "gestionar_objecion":
+                if any(word in message_lower for word in ["si", "sí", "ok", "alternativa"]):
+                    return "proponer_planes_pago"
+                return current_state
+            
+            # ✅ GENERAR ACUERDO
+            elif current_state == "generar_acuerdo":
+                if any(word in message_lower for word in ["confirmo", "acepto", "si", "sí"]):
+                    return "finalizar_conversacion"
+                return current_state
+            
+            # ✅ CLIENTE NO ENCONTRADO
+            elif current_state == "cliente_no_encontrado":
+                return "validar_documento"
+            
+            # Estado por defecto
             return current_state
             
         except Exception as e:
@@ -484,7 +607,7 @@ Esto puede ocurrir si:
                 return context_data
             
             if accion == "consultar_base_datos":
-                cedula = context_data.get("documento_cliente")
+                cedula = context_data.get("cedula_detectada")
                 if cedula:
                     datos = self._consultar_cliente_por_cedula(cedula)
                     context_data.update(datos)
@@ -495,7 +618,7 @@ Esto puede ocurrir si:
             elif accion == "validar_documento":
                 cedula = self._detectar_cedula(context_data.get("ultimo_mensaje", ""))
                 if cedula:
-                    context_data["documento_cliente"] = cedula
+                    context_data["cedula_detectada"] = cedula
             
             return context_data
             
@@ -508,7 +631,7 @@ Esto puede ocurrir si:
     # ================================================================================
     
     def _generar_respuesta_por_intencion(self, intencion: str, context_data: dict) -> str:
-        """Generar respuesta basada en intención ML"""
+        """Generar respuesta basada en intención ML - VERSIÓN MEJORADA"""
         try:
             if intencion == "CONSULTA_DEUDA":
                 if context_data.get("cliente_encontrado"):
@@ -519,10 +642,17 @@ Esto puede ocurrir si:
                     return "Para consultar tu deuda, necesito que me proporciones tu número de cédula."
             
             elif intencion == "INTENCION_PAGO":
-                return "¡Excelente! Te voy a mostrar las mejores opciones de pago disponibles para ti."
+                if context_data.get("cliente_encontrado"):
+                    saldo = self._format_currency(context_data.get("saldo_total", 0))
+                    return f"¡Excelente! Te voy a mostrar las mejores opciones de pago para tu deuda de {saldo}."
+                else:
+                    return "¡Excelente! Te voy a mostrar las mejores opciones de pago disponibles para ti."
             
             elif intencion == "SOLICITUD_PLAN":
-                return "Perfecto, puedo ofrecerte planes de pago personalizados. Déjame mostrarte las opciones."
+                if context_data.get("cliente_encontrado"):
+                    return "Perfecto, puedo ofrecerte planes de pago personalizados basados en tu situación."
+                else:
+                    return "Perfecto, puedo ofrecerte planes de pago personalizados. Déjame mostrarte las opciones."
             
             elif intencion == "CONFIRMACION":
                 return "Perfecto, procedo con la información."
@@ -530,27 +660,67 @@ Esto puede ocurrir si:
             elif intencion == "RECHAZO":
                 return "Entiendo tu posición. ¿Te gustaría que exploremos otras alternativas?"
             
+            elif intencion == "SALUDO":
+                if context_data.get("cliente_encontrado"):
+                    nombre = context_data.get("Nombre_del_cliente", "")
+                    if nombre:
+                        return f"¡Hola {nombre}! Me da gusto saludarte nuevamente. ¿En qué puedo ayudarte hoy?"
+                    else:
+                        return "¡Hola! ¿En qué puedo ayudarte hoy con tu situación financiera?"
+                else:
+                    return "¡Hola! Soy tu asistente de Systemgroup. Para ayudarte mejor, ¿podrías proporcionarme tu número de cédula?"
+            
             else:
-                return "Estoy aquí para ayudarte con tu situación financiera. ¿En qué puedo asistirte?"
-                
+                if context_data.get("cliente_encontrado"):
+                    return "¿En qué más puedo ayudarte con tu situación financiera?"
+                else:
+                    return "Estoy aquí para ayudarte con tu situación financiera. ¿En qué puedo asistirte?"
+                    
         except Exception as e:
             logger.error(f"Error generando respuesta para {intencion}: {e}")
             return "¿En qué puedo ayudarte hoy?"
 
     def _get_buttons_for_ml_state(self, state: str, intencion: str, context_data: dict) -> list:
-        """Obtener botones apropiados para estado ML"""
+        """Obtener botones apropiados para estado ML - VERSIÓN MEJORADA"""
         try:
             if state == "proponer_planes_pago":
-                return [
-                    {"id": "1", "text": "Pago único con descuento", "value": "pago_unico"},
-                    {"id": "2", "text": "Plan en cuotas", "value": "plan_cuotas"},
-                    {"id": "info", "text": "Más información", "value": "mas_info"}
-                ]
+                if context_data.get("cliente_encontrado"):
+                    return [
+                        {"id": "1", "text": "Pago único con descuento", "value": "pago_unico"},
+                        {"id": "2", "text": "Plan en 2 cuotas sin interés", "value": "plan_2_cuotas"},
+                        {"id": "3", "text": "Plan en 6 cuotas", "value": "plan_6_cuotas"},
+                        {"id": "info", "text": "Más información", "value": "mas_info"}
+                    ]
+                else:
+                    return [
+                        {"id": "opciones", "text": "Ver opciones de pago", "value": "ver_opciones"},
+                        {"id": "info", "text": "Más información", "value": "mas_info"}
+                    ]
             
             elif state == "informar_deuda":
                 return [
-                    {"id": "si", "text": "Sí, quiero opciones", "value": "acepta"},
-                    {"id": "no", "text": "No por ahora", "value": "rechaza"}
+                    {"id": "si", "text": "Sí, quiero conocer las opciones", "value": "acepta"},
+                    {"id": "info", "text": "Primero quiero más información", "value": "mas_info"}
+                ]
+            
+            elif state == "evaluar_intencion_pago":
+                return [
+                    {"id": "opciones", "text": "Ver opciones de pago", "value": "ver_opciones"},
+                    {"id": "descuento", "text": "Solicitar descuento", "value": "solicitar_descuento"},
+                    {"id": "info", "text": "Más información", "value": "mas_info"}
+                ]
+            
+            elif state == "seleccionar_plan":
+                return [
+                    {"id": "pago_unico", "text": "Pago único con descuento", "value": "pago_unico"},
+                    {"id": "2_cuotas", "text": "Plan en 2 cuotas sin interés", "value": "plan_2_cuotas"},
+                    {"id": "6_cuotas", "text": "Plan en 6 cuotas", "value": "plan_6_cuotas"}
+                ]
+            
+            elif state == "generar_acuerdo":
+                return [
+                    {"id": "confirmar", "text": "Confirmar acuerdo", "value": "confirmar"},
+                    {"id": "modificar", "text": "Modificar términos", "value": "modificar"}
                 ]
             
             return []
@@ -713,7 +883,7 @@ Esto puede ocurrir si:
         }
 
     def _load_emergency_config(self) -> dict:
-        """Configuración de emergencia"""
+        """Configuración de emergencia AMPLIADA con todos los estados necesarios"""
         return {
             "estados": {
                 "validar_documento": {
@@ -723,13 +893,40 @@ Esto puede ocurrir si:
                 },
                 "informar_deuda": {
                     "nombre": "informar_deuda",
-                    "mensaje_template": "Hola {nombre_cliente}, encontré tu información. Tu saldo actual es de {saldo_total} con {banco}. ¿Te gustaría conocer las opciones de pago disponibles?",
+                    "mensaje_template": "Hola {{nombre_cliente}}, encontré tu información. Tu saldo actual es de {{saldo_total}} con {{banco}}. ¿Te gustaría conocer las opciones de pago disponibles?",
                     "estado_siguiente_default": "proponer_planes_pago"
                 },
                 "proponer_planes_pago": {
                     "nombre": "proponer_planes_pago",
-                    "mensaje_template": "Te ofrezco estas opciones: 1️⃣ Pago único de {oferta_2} 2️⃣ Plan en cuotas. ¿Cuál te interesa?",
+                    "mensaje_template": "Te ofrezco estas opciones: 1️⃣ Pago único de {{oferta_2}} 2️⃣ Plan en cuotas. ¿Cuál te interesa?",
+                    "estado_siguiente_default": "seleccionar_plan"
+                },
+                # ✅ AGREGAR ESTADO FALTANTE
+                "seleccionar_plan": {
+                    "nombre": "seleccionar_plan", 
+                    "mensaje_template": "Has elegido un plan de pago. ¿Confirmas tu selección?",
                     "estado_siguiente_default": "generar_acuerdo"
+                },
+                "generar_acuerdo": {
+                    "nombre": "generar_acuerdo",
+                    "mensaje_template": "¡Excelente! Voy a generar tu acuerdo de pago. Te enviaré los detalles completos.",
+                    "estado_siguiente_default": "finalizar_conversacion"
+                },
+                "cliente_no_encontrado": {
+                    "nombre": "cliente_no_encontrado",
+                    "mensaje_template": "No encontré información para ese documento. Por favor verifica el número.",
+                    "estado_siguiente_default": "validar_documento"
+                },
+                "gestionar_objecion": {
+                    "nombre": "gestionar_objecion",
+                    "mensaje_template": "Entiendo tu situación. ¿Te gustaría que exploremos otras alternativas?",
+                    "estado_siguiente_default": "proponer_planes_pago"
+                },
+                # ✅ NUEVO ESTADO PARA EVALUACIÓN
+                "evaluar_intencion_pago": {
+                    "nombre": "evaluar_intencion_pago",
+                    "mensaje_template": "¿Está interesado en realizar un acuerdo de pago?",
+                    "estado_siguiente_default": "proponer_planes_pago"
                 }
             }
         }
@@ -762,7 +959,7 @@ Esto puede ocurrir si:
         """Ejecutar acciones configurables"""
         try:
             if accion == "consultar_base_datos":
-                cedula = self._detectar_cedula(mensaje) or context_data.get("documento_cliente")
+                cedula = self._detectar_cedula(mensaje) or context_data.get("cedula_detectada")
                 if cedula:
                     datos = self._consultar_cliente_por_cedula(cedula)
                     context_data.update(datos)
@@ -786,7 +983,7 @@ Esto puede ocurrir si:
             elif condicion == "cliente_rechaza":
                 return any(palabra in mensaje_lower for palabra in ["no", "no puedo", "imposible"])
             elif condicion == "tiene_documento":
-                return bool(context_data.get("documento_cliente") or self._detectar_cedula(mensaje))
+                return bool(context_data.get("cedula_detectada") or self._detectar_cedula(mensaje))
             elif condicion == "cliente_encontrado":
                 return context_data.get("cliente_encontrado", False)
             

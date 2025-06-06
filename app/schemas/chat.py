@@ -22,10 +22,39 @@ class ChatResponse(BaseModel):
     buttons: Optional[List[ButtonOption]] = []
     context_data: Optional[Dict[str, Any]] = {}
 
+class MessageResponse(BaseModel):
+    """Modelo para respuesta de mensaje individual"""
+    id: int
+    sender_type: str
+    text_content: str
+    timestamp: Optional[str] = None
+    button_selected: Optional[str] = None
+    previous_state: Optional[str] = None
+    next_state: Optional[str] = None
+
+class ConversationHistoryResponse(BaseModel):
+    conversation_id: int
+    messages: List[Dict[str, Any]]
+    total: int
+    current_state: str
+
 class ConversationListResponse(BaseModel):
     conversations: List[Dict[str, Any]]
     total: int
 
+class CedulaTestRequest(BaseModel):
+    """Modelo para test de cédula"""
+    cedula: str
+
+class CedulaTestResponse(BaseModel):
+    """Modelo para respuesta de test de cédula"""
+    cedula: str
+    cliente_encontrado: bool
+    nombre_cliente: Optional[str] = None
+    saldo_total: Optional[str] = None
+    banco: Optional[str] = None
+    mensaje: str
+    
 # Schemas para configuración admin
 class ConfiguracionEstado(BaseModel):
     nombre: str

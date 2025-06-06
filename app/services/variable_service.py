@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 class VariableService:
-    """Servicio para resolver variables del sistema"""
+    """Servicio CORREGIDO para resolver variables del sistema"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -18,11 +18,11 @@ class VariableService:
         
     def resolver_variables(self, texto: str, contexto: Dict[str, Any] = None) -> str:
         """
-        Resuelve todas las variables {{variable}} en un texto
+        ✅ VERSIÓN CORREGIDA - Resuelve variables usando contexto PRIMERO, BD después
         
         Args:
             texto: Texto con variables a resolver
-            contexto: Contexto adicional con valores específicos
+            contexto: Contexto con datos del cliente
             
         Returns:
             Texto con variables resueltas
@@ -34,33 +34,291 @@ class VariableService:
             contexto = {}
             
         try:
-            # Cargar variables del sistema
-            variables_sistema = self._cargar_variables_sistema()
+            print(f"🔧 Resolviendo variables en: {texto[:100]}...")
+            print(f"📋 Contexto disponible: {list(contexto.keys())}")
             
-            # Combinar variables del sistema con contexto
-            todas_las_variables = {**variables_sistema, **contexto}
+            # ✅ PRIORIZAR DATOS DEL CONTEXTO
+            datos_combinados = self._combinar_datos_contexto_y_sistema(contexto)
             
             # Buscar y reemplazar variables {{variable}}
             patron = r'\{\{([^}]+)\}\}'
             
             def reemplazar_variable(match):
                 nombre_variable = match.group(1).strip()
-                return self._resolver_variable_individual(nombre_variable, todas_las_variables)
+                valor = self._resolver_variable_individual_corregida(nombre_variable, datos_combinados)
+                print(f"   {{{{{nombre_variable}}}}} → {valor}")
+                return valor
             
             texto_resuelto = re.sub(patron, reemplazar_variable, texto)
             
-            logger.debug(f"Variables resueltas: {texto[:50]}... -> {texto_resuelto[:50]}...")
+            print(f"✅ Variables resueltas correctamente")
             return texto_resuelto
             
         except Exception as e:
             logger.error(f"Error resolviendo variables: {e}")
-            # Devolver texto original si hay error
+            print(f"❌ Error resolviendo variables: {e}")
             return texto
+    
+    def _combinar_datos_contexto_y_sistema(self, contexto: Dict[str, Any]) -> Dict[str, Any]:
+        """✅ NUEVO - Combina datos del contexto con variables del sistema"""
+        try:
+            # 1. Cargar variables del sistema
+            variables_sistema = self._cargar_variables_sistema()
+            
+            # 2. Extraer datos del contexto
+            datos_cliente = {}
+            
+            # Verificar si hay datos directos en el contexto
+            if "Nombre_del_cliente" in contexto:
+                datos_cliente.update({
+                    "nombre_cliente": contexto.get("Nombre_del_cliente", "Cliente"),
+                    "saldo_total": contexto.get("saldo_total", 0),
+                    "banco": contexto.get("banco", "Entidad Financiera"),
+                    "cedula": contexto.get("cedula_detectada", ""),
+                    "capital": contexto.get("capital", 0),
+                    "intereses": contexto.get("intereses", 0),
+                    "producto": contexto.get("producto", "Producto"),
+                    "campana": contexto.get("campana", "General"),
+                    "telefono": contexto.get("telefono", ""),
+                    "email": contexto.get("email", ""),
+                    
+                    # ✅ OFERTAS DESDE CONTEXTO
+                    "oferta_1": contexto.get("oferta_1", 0),
+                    "oferta_2": contexto.get("oferta_2", 0),
+                    "oferta_3": contexto.get("oferta_3", 0),
+                    "oferta_4": contexto.get("oferta_4", 0),
+                    
+                    # ✅ CUOTAS DESDE CONTEXTO
+                    "hasta_3_cuotas": contexto.get("hasta_3_cuotas", 0),
+                    "hasta_6_cuotas": contexto.get("hasta_6_cuotas", 0),
+                    "hasta_12_cuotas": contexto.get("hasta_12_cuotas", 0),
+                    "hasta_18_cuotas": contexto.get("hasta_18_cuotas", 0),
+                })
+                
+                print(f"✅ Datos del cliente extraídos del contexto:")
+                print(f"   Nombre: {datos_cliente.get('nombre_cliente')}")
+                print(f"   Saldo: {datos_cliente.get('saldo_total')}")
+                print(f"   Ofertas: {datos_cliente.get('oferta_1')}, {datos_cliente.get('oferta_2')}")
+                print(f"   Cuotas: {datos_cliente.get('hasta_3_cuotas')}, {datos_cliente.get('hasta_6_cuotas')}")
+            
+            # 3. Si no hay datos en contexto, intentar obtener cédula para consultar
+            elif contexto.get("cedula_detectada"):
+                cedula = contexto["cedula_detectada"]
+                print(f"🔍 Consultando datos para cédula: {cedula}")
+                datos_cliente = self._consultar_todos_datos_cliente(cedula)
+            
+            # 4. Combinar todo
+            datos_finales = {**variables_sistema, **datos_cliente, **contexto}
+            
+            print(f"🔧 Datos combinados: {len(datos_finales)} variables disponibles")
+            return datos_finales
+            
+        except Exception as e:
+            logger.error(f"Error combinando datos: {e}")
+            return contexto
+    
+    def _resolver_variable_individual(self, nombre: str, datos_combinados: Dict[str, Any]) -> str:
+        """✅ VERSIÓN CORREGIDA - Resuelve variable individual"""
+        
+        # 1. Verificar si existe directamente en los datos
+        if nombre in datos_combinados:
+            valor = datos_combinados[nombre]
+            return self._formatear_valor(valor, nombre)
+        
+        # 2. Mapeo de alias para compatibilidad
+        alias_mapping = {
+            "cliente_nombre": "nombre_cliente",
+            "entidad_financiera": "banco",
+            "entidad": "banco",
+            "deuda_total": "saldo_total",
+            "cedula_cliente": "cedula",
+            "cedula_detectada": "cedula",
+        }
+        
+        if nombre in alias_mapping:
+            nombre_real = alias_mapping[nombre]
+            if nombre_real in datos_combinados:
+                valor = datos_combinados[nombre_real]
+                return self._formatear_valor(valor, nombre)
+        
+        # 3. Variables calculadas dinámicamente
+        valor_calculado = self._calcular_variable_dinamica_corregida(nombre, datos_combinados)
+        if valor_calculado is not None:
+            return str(valor_calculado)
+        
+        # 4. Valor por defecto
+        return self._get_valor_por_defecto(nombre)
+    
+    def _formatear_valor(self, valor: Any, tipo_variable: str) -> str:
+        """Formatea un valor según el tipo de variable"""
+        try:
+            if valor is None:
+                return self._get_valor_por_defecto(tipo_variable)
+            
+            # Variables monetarias
+            if any(keyword in tipo_variable.lower() for keyword in 
+                   ['saldo', 'oferta', 'capital', 'interes', 'cuota', 'pago', 'monto']):
+                return self._formatear_moneda(valor)
+            
+            # Variables de texto
+            return str(valor)
+            
+        except Exception as e:
+            logger.error(f"Error formateando valor {valor}: {e}")
+            return str(valor)
+    
+    def _formatear_moneda(self, valor: Any) -> str:
+        """Formatea valor como moneda"""
+        try:
+            if isinstance(valor, str):
+                # Si ya tiene formato de moneda, devolverlo
+                if "$" in valor:
+                    return valor
+                # Intentar convertir string a número
+                valor_limpio = valor.replace(",", "").replace("$", "").strip()
+                if valor_limpio.replace(".", "").isdigit():
+                    valor = float(valor_limpio)
+                else:
+                    return valor
+            
+            if isinstance(valor, (int, float)) and valor > 0:
+                return f"${valor:,.0f}"
+            else:
+                return f"${0:,.0f}"
+                
+        except Exception as e:
+            logger.error(f"Error formateando moneda {valor}: {e}")
+            return str(valor)
+    
+    def _calcular_variable_dinamica(self, nombre: str, datos: Dict[str, Any]) -> Optional[str]:
+        """✅ VERSIÓN CORREGIDA - Calcula variables dinámicas"""
+        try:
+            # ===== FECHAS =====
+            if nombre == "fecha_limite":
+                fecha_limite = datetime.now() + timedelta(days=30)
+                return fecha_limite.strftime("%d de %B de %Y")
+                
+            elif nombre == "fecha_hoy":
+                return datetime.now().strftime("%d de %B de %Y")
+                
+            elif nombre == "mes_actual":
+                meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+                return meses[datetime.now().month - 1]
+            
+            # ===== DESCUENTOS CALCULADOS =====
+            elif nombre.startswith("descuento_"):
+                saldo = self._extraer_numero(datos.get("saldo_total", 0))
+                if "3_cuotas" in nombre:
+                    cuotas_val = self._extraer_numero(datos.get("hasta_3_cuotas", 0))
+                    if saldo > 0 and cuotas_val > 0:
+                        total_cuotas = cuotas_val * 3
+                        descuento = ((saldo - total_cuotas) / saldo) * 100
+                        return f"{descuento:.0f}%"
+                    return "40%"
+                elif "6_cuotas" in nombre:
+                    cuotas_val = self._extraer_numero(datos.get("hasta_6_cuotas", 0))
+                    if saldo > 0 and cuotas_val > 0:
+                        total_cuotas = cuotas_val * 6
+                        descuento = ((saldo - total_cuotas) / saldo) * 100
+                        return f"{descuento:.0f}%"
+                    return "30%"
+                elif "12_cuotas" in nombre:
+                    cuotas_val = self._extraer_numero(datos.get("hasta_12_cuotas", 0))
+                    if saldo > 0 and cuotas_val > 0:
+                        total_cuotas = cuotas_val * 12
+                        descuento = ((saldo - total_cuotas) / saldo) * 100
+                        return f"{descuento:.0f}%"
+                    return "20%"
+            
+            # ===== PAGOS ESPECIALES =====
+            elif nombre == "pago_flexible":
+                saldo = self._extraer_numero(datos.get("saldo_total", 0))
+                if saldo > 0:
+                    pago = saldo * 0.15  # 15% del saldo
+                    return self._formatear_moneda(pago)
+                    
+            elif nombre == "pago_minimo":
+                saldo = self._extraer_numero(datos.get("saldo_total", 0))
+                if saldo > 0:
+                    pago = saldo * 0.10  # 10% del saldo
+                    return self._formatear_moneda(pago)
+                    
+            elif nombre == "ahorro_maximo":
+                saldo = self._extraer_numero(datos.get("saldo_total", 0))
+                oferta_1 = self._extraer_numero(datos.get("oferta_1", 0))
+                if saldo > 0 and oferta_1 > 0:
+                    ahorro = saldo - oferta_1
+                    return self._formatear_moneda(ahorro)
+                    
+            elif nombre == "cuota_mensual":
+                # Cuota por defecto en 6 cuotas
+                saldo = self._extraer_numero(datos.get("saldo_total", 0))
+                if saldo > 0:
+                    cuota = saldo / 6
+                    return self._formatear_moneda(cuota)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error calculando variable {nombre}: {e}")
+            return None
+    
+    def _consultar_todos_datos_cliente(self, cedula: str) -> Dict[str, Any]:
+        """✅ NUEVO - Consulta TODOS los datos del cliente de una vez"""
+        if not cedula:
+            return {}
+            
+        try:
+            query = text("""
+                SELECT TOP 1 
+                    Nombre_del_cliente, Cedula, Telefono, Email,
+                    Saldo_total, Capital, Intereses, 
+                    Oferta_1, Oferta_2, Oferta_3, Oferta_4,
+                    banco, Producto, NumerodeObligacion, Campaña,
+                    Hasta_3_cuotas, Hasta_6_cuotas, Hasta_12_cuotas, Hasta_18_cuotas
+                FROM ConsolidadoCampañasNatalia 
+                WHERE CAST(Cedula AS VARCHAR) = :cedula
+                ORDER BY Saldo_total DESC
+            """)
+            
+            result = self.db.execute(query, {"cedula": str(cedula)}).fetchone()
+            
+            if result:
+                datos = {
+                    "nombre_cliente": result[0] or "Cliente",
+                    "cedula": result[1] or cedula,
+                    "telefono": result[2] or "",
+                    "email": result[3] or "",
+                    "saldo_total": float(result[4]) if result[4] else 0,
+                    "capital": float(result[5]) if result[5] else 0,
+                    "intereses": float(result[6]) if result[6] else 0,
+                    "oferta_1": float(result[7]) if result[7] else 0,
+                    "oferta_2": float(result[8]) if result[8] else 0,
+                    "oferta_3": float(result[9]) if result[9] else 0,
+                    "oferta_4": float(result[10]) if result[10] else 0,
+                    "banco": result[11] or "Entidad Financiera",
+                    "producto": result[12] or "Producto",
+                    "numero_obligacion": result[13] or "",
+                    "campana": result[14] or "General",
+                    "hasta_3_cuotas": float(result[15]) if result[15] else 0,
+                    "hasta_6_cuotas": float(result[16]) if result[16] else 0,
+                    "hasta_12_cuotas": float(result[17]) if result[17] else 0,
+                    "hasta_18_cuotas": float(result[18]) if result[18] else 0,
+                }
+                
+                print(f"✅ Datos completos del cliente consultados desde BD")
+                return datos
+            else:
+                print(f"❌ Cliente con cédula {cedula} no encontrado en BD")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error consultando cliente {cedula}: {e}")
+            return {}
     
     def _cargar_variables_sistema(self) -> Dict[str, str]:
         """Carga variables del sistema desde la base de datos"""
-        
-        # Verificar cache
         import time
         current_time = time.time()
         
@@ -85,352 +343,75 @@ class VariableService:
                 valor = row[1] or ""
                 formato = row[2] or "{0}"
                 
-                # Aplicar formato si es necesario
                 try:
                     if formato == "{0}":
                         variables[nombre] = str(valor)
-                    elif "${" in formato:
-                        # Formato monetario
-                        valor_numerico = float(valor) if valor.replace('.', '').replace(',', '').isdigit() else 0
-                        variables[nombre] = formato.format(valor_numerico)
-                    elif "%" in formato:
-                        # Formato porcentaje
-                        valor_numerico = float(valor) if valor.replace('.', '').isdigit() else 0
-                        variables[nombre] = formato.format(valor_numerico)
                     else:
                         variables[nombre] = formato.format(valor)
-                        
-                except (ValueError, TypeError):
+                except:
                     variables[nombre] = str(valor)
             
-            # Actualizar cache
             self._cache_variables = variables
             self._cache_timestamp = current_time
             
-            logger.info(f"Variables del sistema cargadas: {len(variables)}")
             return variables
             
         except Exception as e:
             logger.error(f"Error cargando variables del sistema: {e}")
             return {}
     
-    def _resolver_variable_individual(self, nombre: str, variables: Dict[str, Any]) -> str:
-        """Resuelve una variable individual"""
-        
-        # Verificar si la variable existe
-        if nombre in variables:
-            valor = variables[nombre]
-            logger.debug(f"Variable {nombre} resuelta: {valor}")
-            return str(valor)
-        
-        # Variables calculadas dinámicamente
-        valor_calculado = self._calcular_variable_dinamica(nombre, variables)
-        if valor_calculado is not None:
-            return str(valor_calculado)
-        
-        # Si no se encuentra, devolver placeholder o valor por defecto
-        logger.warning(f"Variable no encontrada: {nombre}")
-        return self._get_valor_por_defecto(nombre)
-    
-    def _calcular_variable_dinamica(self, nombre: str, contexto: Dict[str, Any]) -> Optional[str]:
-        """Calcula variables dinámicas basadas en lógica de negocio"""
-        
-        try:
-            # Obtener cédula para consultar BD
-            cedula = contexto.get("cedula", contexto.get("cedula_detectada", ""))
-            
-            # Obtener datos base del cliente
-            cliente_info = contexto.get("cliente", {})
-            if isinstance(cliente_info, dict):
-                nombre_cliente = cliente_info.get("nombre", "Cliente")
-                campana = cliente_info.get("campana", "General")
-                banco = cliente_info.get("banco", "Entidad Financiera")
-            else:
-                nombre_cliente = "Cliente"
-                campana = "General"
-                banco = "Entidad Financiera"
-            
-            # ===== VARIABLES BÁSICAS =====
-            if nombre == "saldo_total":
-                return self._consultar_campo_cliente(cedula, "Saldo_total")
-                
-            elif nombre == "nombre_cliente" or nombre == "cliente_nombre":
-                return self._consultar_campo_cliente(cedula, "Nombre_del_cliente") or nombre_cliente
-                
-            elif nombre == "entidad_financiera" or nombre == "banco":
-                return self._consultar_campo_cliente(cedula, "banco") or banco
-                
-            elif nombre == "campana":
-                return self._consultar_campo_cliente(cedula, "Campaña") or campana
-                
-            elif nombre == "cedula":
-                return str(cedula)
-            
-            # ===== OFERTAS DE PAGO (CONSULTAR DE BD) =====
-            elif nombre == "oferta_1":
-                return self._consultar_campo_cliente(cedula, "Oferta_1")
-                
-            elif nombre == "oferta_2":
-                return self._consultar_campo_cliente(cedula, "Oferta_2")
-                
-            elif nombre == "oferta_3":
-                return self._consultar_campo_cliente(cedula, "Oferta_3")
-                
-            elif nombre == "oferta_4":
-                return self._consultar_campo_cliente(cedula, "Oferta_4")
-            
-            # ===== VALORES DE CUOTAS (CONSULTAR DE BD) =====
-            elif nombre == "hasta_3_cuotas":
-                return self._consultar_campo_cliente(cedula, "Hasta_3_cuotas")
-                
-            elif nombre == "hasta_6_cuotas":
-                return self._consultar_campo_cliente(cedula, "Hasta_6_cuotas")
-                
-            elif nombre == "hasta_12_cuotas":
-                return self._consultar_campo_cliente(cedula, "Hasta_12_cuotas")
-                
-            elif nombre == "hasta_18_cuotas":
-                return self._consultar_campo_cliente(cedula, "Hasta_18_cuotas")
-            
-            # ===== OTROS CAMPOS DE BD =====
-            elif nombre == "capital":
-                return self._consultar_campo_cliente(cedula, "Capital")
-                
-            elif nombre == "intereses":
-                return self._consultar_campo_cliente(cedula, "Intereses")
-                
-            elif nombre == "producto":
-                return self._consultar_campo_cliente(cedula, "Producto")
-                
-            elif nombre == "telefono":
-                return self._consultar_campo_cliente(cedula, "Telefono")
-                
-            elif nombre == "ultimos_digitos":
-                return self._consultar_campo_cliente(cedula, "Ultimos_digitos")
-            
-            # ===== DESCUENTOS CALCULADOS (si no están en BD) =====
-            elif nombre == "descuento_3_cuotas":
-                return self._calcular_descuento_cuotas(cedula, 3)
-                
-            elif nombre == "descuento_6_cuotas":
-                return self._calcular_descuento_cuotas(cedula, 6)
-                
-            elif nombre == "descuento_12_cuotas":
-                return self._calcular_descuento_cuotas(cedula, 12)
-            
-            # ===== FECHAS =====
-            elif nombre == "fecha_limite":
-                # Fecha límite: 30 días desde hoy
-                fecha_limite = datetime.now() + timedelta(days=30)
-                return fecha_limite.strftime("%d de %B de %Y")
-                
-            elif nombre == "fecha_hoy":
-                return datetime.now().strftime("%d de %B de %Y")
-                
-            elif nombre == "mes_actual":
-                meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
-                        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-                return meses[datetime.now().month - 1]
-            
-            # ===== VARIABLES DE NEGOCIACIÓN CALCULADAS =====
-            elif nombre == "pago_flexible":
-                # Pago inicial flexible: 10% del saldo
-                saldo_str = self._consultar_campo_cliente(cedula, "Saldo_total")
-                if saldo_str:
-                    saldo = self._extraer_numero(saldo_str)
-                    pago = saldo * 0.10
-                    return self._formatear_moneda(pago)
-                return self._get_valor_por_defecto(nombre)
-                
-            elif nombre == "pago_minimo":
-                # Pago mínimo: 10% del saldo
-                saldo_str = self._consultar_campo_cliente(cedula, "Saldo_total")
-                if saldo_str:
-                    saldo = self._extraer_numero(saldo_str)
-                    pago = saldo * 0.1
-                    return self._formatear_moneda(pago)
-                return self._get_valor_por_defecto(nombre)
-                
-            elif nombre == "ahorro_maximo":
-                # Calcular ahorro máximo basado en ofertas reales
-                saldo_str = self._consultar_campo_cliente(cedula, "Saldo_total")
-                oferta1_str = self._consultar_campo_cliente(cedula, "Oferta_1")
-                if saldo_str and oferta1_str:
-                    saldo = self._extraer_numero(saldo_str)
-                    oferta = self._extraer_numero(oferta1_str)
-                    ahorro = saldo - oferta
-                    return self._formatear_moneda(ahorro)
-                return self._get_valor_por_defecto(nombre)
-            
-            # ===== VARIABLES DE CONTEXTO =====
-            elif nombre == "descuento_disponible":
-                # Descuento por defecto
-                descuento = contexto.get('descuento', 40)
-                return f"{descuento}%"
-                
-            elif nombre == "cuota_mensual":
-                # Cuota mensual genérica (6 cuotas por defecto)
-                cuotas = int(contexto.get("num_cuotas", 6))
-                saldo_str = self._consultar_campo_cliente(cedula, "Saldo_total")
-                if saldo_str:
-                    saldo = self._extraer_numero(saldo_str)
-                    cuota = saldo / cuotas
-                    return self._formatear_moneda(cuota)
-                return self._get_valor_por_defecto(nombre)
-                
-        except (ValueError, TypeError, ZeroDivisionError) as e:
-            logger.error(f"Error calculando variable {nombre}: {e}")
-            
-        return None
-    
-    def _consultar_campo_cliente(self, cedula: str, campo: str) -> Optional[str]:
-        """
-        Consulta un campo específico del cliente en la tabla ConsolidadoCampañasNatalia
-        
-        Args:
-            cedula: Cédula del cliente
-            campo: Nombre del campo a consultar
-            
-        Returns:
-            Valor del campo formateado, None si no se encuentra
-        """
-        if not cedula or not campo:
-            return None
-            
-        try:
-            # Query para obtener el campo específico
-            query = text(f"""
-                SELECT TOP 1 [{campo}]
-                FROM ConsolidadoCampañasNatalia 
-                WHERE Cedula = :cedula
-            """)
-            
-            result = self.db.execute(query, {"cedula": cedula})
-            row = result.fetchone()
-            
-            if row and row[0] is not None:
-                valor = row[0]
-                
-                # Formatear según el tipo de campo
-                if campo in ["Saldo_total", "Capital", "Intereses", "Oferta_1", "Oferta_2", "Oferta_3", "Oferta_4", 
-                           "Hasta_3_cuotas", "Hasta_6_cuotas", "Hasta_12_cuotas", "Hasta_18_cuotas"]:
-                    # Campos monetarios
-                    if isinstance(valor, (int, float)):
-                        return self._formatear_moneda(float(valor))
-                    elif isinstance(valor, str) and valor.replace('.', '').replace(',', '').isdigit():
-                        return self._formatear_moneda(float(valor.replace(',', '')))
-                    else:
-                        return str(valor)
-                else:
-                    # Campos de texto
-                    return str(valor).strip()
-                    
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error consultando campo {campo} para cédula {cedula}: {e}")
-            return None
-    
-    def _calcular_descuento_cuotas(self, cedula: str, num_cuotas: int) -> str:
-        """
-        Calcula el descuento basado en los valores reales de BD
-        
-        Args:
-            cedula: Cédula del cliente
-            num_cuotas: Número de cuotas
-            
-        Returns:
-            Porcentaje de descuento
-        """
-        try:
-            saldo_str = self._consultar_campo_cliente(cedula, "Saldo_total")
-            cuota_str = self._consultar_campo_cliente(cedula, f"Hasta_{num_cuotas}_cuotas")
-            
-            if saldo_str and cuota_str:
-                saldo = self._extraer_numero(saldo_str)
-                cuota = self._extraer_numero(cuota_str)
-                
-                if saldo > 0 and cuota > 0:
-                    total_a_pagar = cuota * num_cuotas
-                    descuento = ((saldo - total_a_pagar) / saldo) * 100
-                    return f"{descuento:.0f}%"
-                    
-        except Exception as e:
-            logger.error(f"Error calculando descuento para {num_cuotas} cuotas: {e}")
-            
-        # Valores por defecto si no se puede calcular
-        descuentos_defecto = {3: "40%", 6: "30%", 12: "20%"}
-        return descuentos_defecto.get(num_cuotas, "15%")
-    
-    def _extraer_numero(self, valor_str: str) -> float:
-        """
-        Extrae el número de una cadena con formato monetario
-        
-        Args:
-            valor_str: String con formato como "$1,234.56" o "1234.56"
-            
-        Returns:
-            Valor numérico float
-        """
+    def _extraer_numero(self, valor_str: Any) -> float:
+        """Extrae el número de una cadena con formato monetario"""
         if not valor_str:
             return 0.0
             
         try:
-            # Remover símbolos monetarios y espacios
+            if isinstance(valor_str, (int, float)):
+                return float(valor_str)
+            
             numero_limpio = str(valor_str).replace('$', '').replace(',', '').replace(' ', '')
             return float(numero_limpio)
-        except (ValueError, TypeError):
-            return 0.0
-    
-    def _formatear_moneda(self, valor: float) -> str:
-        """Formatea un valor como moneda colombiana"""
-        try:
-            # Formatear como peso colombiano
-            return f"${valor:,.0f}"
         except:
-            return f"${valor}"
+            return 0.0
     
     def _get_valor_por_defecto(self, nombre: str) -> str:
         """Devuelve valor por defecto para variables no encontradas"""
-        
         valores_defecto = {
-            # Variables básicas
             "saldo_total": "$0",
-            "nombre_cliente": "Cliente",
+            "nombre_cliente": "Cliente", 
             "cliente_nombre": "Cliente",
-            "entidad_financiera": "Entidad Financiera",
             "banco": "Entidad Financiera",
-            "campana": "General",
+            "entidad_financiera": "Entidad Financiera",
             "cedula": "",
             "capital": "$0",
             "intereses": "$0",
             "producto": "Producto",
             "telefono": "",
-            "ultimos_digitos": "",
+            "email": "",
+            "campana": "General",
             
-            # Ofertas (serán consultadas de BD)
+            # Ofertas
             "oferta_1": "$0",
-            "oferta_2": "$0",
+            "oferta_2": "$0", 
             "oferta_3": "$0",
             "oferta_4": "$0",
             
-            # Descuentos (calculados dinámicamente)
-            "descuento_3_cuotas": "40%",
-            "descuento_6_cuotas": "30%",
-            "descuento_12_cuotas": "20%",
-            "descuento_disponible": "40%",
-            
-            # Cuotas (serán consultadas de BD)
+            # Cuotas
             "hasta_3_cuotas": "$0",
             "hasta_6_cuotas": "$0",
             "hasta_12_cuotas": "$0",
             "hasta_18_cuotas": "$0",
             "cuota_mensual": "$0",
             
-            # Pagos calculados
+            # Pagos especiales
             "pago_flexible": "$0",
             "pago_minimo": "$0",
             "ahorro_maximo": "$0",
+            
+            # Descuentos
+            "descuento_3_cuotas": "40%",
+            "descuento_6_cuotas": "30%",
+            "descuento_12_cuotas": "20%",
             
             # Fechas
             "fecha_limite": "30 días",
@@ -440,126 +421,22 @@ class VariableService:
         
         return valores_defecto.get(nombre, f"[{nombre}]")
     
-    def registrar_variable_contexto(self, nombre: str, valor: Any, conversation_id: int):
-        """Registra una variable en el contexto de la conversación"""
-        try:
-            # Aquí podrías guardar variables específicas de conversación
-            # Por ahora solo logueamos
-            logger.info(f"Variable contexto registrada: {nombre}={valor} para conversación {conversation_id}")
-            
-        except Exception as e:
-            logger.error(f"Error registrando variable contexto: {e}")
-    
-    def obtener_variables_disponibles(self) -> Dict[str, str]:
-        """Obtiene lista de todas las variables disponibles"""
-        try:
-            variables_sistema = self._cargar_variables_sistema()
-            
-            # Agregar variables dinámicas
-            variables_dinamicas = {
-                # Variables básicas
-                "saldo_total": "Saldo total de la deuda",
-                "nombre_cliente": "Nombre del cliente",
-                "cliente_nombre": "Nombre del cliente (alias)",
-                "entidad_financiera": "Entidad financiera",
-                "banco": "Banco (alias)",
-                "campana": "Campaña actual",
-                "cedula": "Cédula del cliente detectada",
-                "capital": "Capital de la deuda",
-                "intereses": "Intereses de la deuda",
-                "producto": "Producto financiero",
-                "telefono": "Teléfono del cliente",
-                "ultimos_digitos": "Últimos dígitos de la cuenta",
-                
-                # Ofertas de pago único
-                "oferta_1": "Oferta 1 de pago único",
-                "oferta_2": "Oferta 2 de pago único",
-                "oferta_3": "Oferta 3 de pago único",
-                "oferta_4": "Oferta 4 de pago único",
-                
-                # Descuentos por cuotas
-                "descuento_3_cuotas": "Descuento para 3 cuotas",
-                "descuento_6_cuotas": "Descuento para 6 cuotas",
-                "descuento_12_cuotas": "Descuento para 12 cuotas",
-                
-                # Valores de cuotas
-                "hasta_3_cuotas": "Valor cuota en plan 3 cuotas",
-                "hasta_6_cuotas": "Valor cuota en plan 6 cuotas", 
-                "hasta_12_cuotas": "Valor cuota en plan 12 cuotas",
-                "hasta_18_cuotas": "Valor cuota en plan 18 cuotas",
-                "cuota_mensual": "Cuota mensual estimada",
-                
-                # Pagos especiales
-                "pago_flexible": "Pago inicial flexible (15%)",
-                "pago_minimo": "Pago mínimo requerido (10%)",
-                "ahorro_maximo": "Máximo ahorro disponible",
-                
-                # Fechas
-                "fecha_limite": "Fecha límite de la oferta",
-                "fecha_hoy": "Fecha actual",
-                "mes_actual": "Mes actual",
-                
-                # Variables de contexto
-                "descuento_disponible": "Descuento disponible"
-            }
-            
-            return {**variables_sistema, **variables_dinamicas}
-            
-        except Exception as e:
-            logger.error(f"Error obteniendo variables disponibles: {e}")
-            return {}
-    
-    def probar_variables(self, contexto_prueba: Dict[str, Any] = None) -> Dict[str, str]:
-        """Método para probar resolución de variables (útil para debugging)"""
-        if contexto_prueba is None:
-            contexto_prueba = {
-                "cedula_detectada": "1020428633",  # Cédula de ejemplo
-                "cliente": {
-                    "nombre": "JONATHAN RAMIREZ",
-                    "campana": "Campaña Test"
-                }
-            }
-        
+    def probar_variables_con_contexto(self, contexto_prueba: Dict[str, Any]) -> Dict[str, str]:
+        """Método para probar resolución de variables"""
         variables_test = [
-            "saldo_total", "nombre_cliente", "oferta_1", "oferta_2", "oferta_3",
+            "saldo_total", "nombre_cliente", "oferta_1", "oferta_2", 
             "hasta_3_cuotas", "hasta_6_cuotas", "hasta_12_cuotas",
-            "descuento_3_cuotas", "descuento_6_cuotas", 
-            "fecha_limite", "pago_flexible", "ahorro_maximo",
-            "capital", "intereses", "producto"
+            "descuento_3_cuotas", "pago_flexible", "ahorro_maximo"
         ]
         
         resultados = {}
-        cedula = contexto_prueba.get("cedula_detectada", "")
-        
-        logger.info(f"Probando variables para cédula: {cedula}")
-        
         for var in variables_test:
             texto_test = f"{{{{{var}}}}}"
             resultado = self.resolver_variables(texto_test, contexto_prueba)
             resultados[var] = resultado
-            logger.debug(f"Variable {var}: {resultado}")
             
         return resultados
-    
-    def probar_con_cedula(self, cedula: str) -> Dict[str, str]:
-        """
-        Probar variables con una cédula específica
-        
-        Args:
-            cedula: Cédula del cliente a probar
-            
-        Returns:
-            Diccionario con resultados de las variables
-        """
-        contexto = {
-            "cedula_detectada": cedula,
-            "cliente": {
-                "nombre": "Cliente Test"
-            }
-        }
-        
-        return self.probar_variables(contexto)
 
 def crear_variable_service(db: Session) -> VariableService:
-    """Factory para crear instancia del servicio de variables"""
+    """Factory para crear instancia corregida del servicio de variables"""
     return VariableService(db)

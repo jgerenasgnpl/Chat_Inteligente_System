@@ -4,10 +4,48 @@ from collections import Counter
 from typing import Dict, List, Any, Set
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+import os
+import glob
+from pathlib import Path
+
+def obtener_modelo_mas_reciente():
+    """Obtener el modelo más reciente (incluye los FIXED)"""
+    models_dir = Path("models")
+    
+    if not models_dir.exists():
+        print("❌ Directorio models no existe")
+        return None
+    
+    # Buscar modelos FIXED primero, luego otros
+    patterns = [
+        "intention_classifier_FIXED_*.joblib",
+        "intention_classifier_optimizado_*.joblib", 
+        "intention_classifier_*.joblib"
+    ]
+    
+    for pattern in patterns:
+        files = list(models_dir.glob(pattern))
+        if files:
+            # Ordenar por fecha de modificación (más reciente primero)
+            latest_file = max(files, key=os.path.getmtime)
+            print(f"✅ Usando modelo: {latest_file}")
+            return str(latest_file)
+    
+    print("❌ No se encontró ningún modelo")
+    return None
 
 class SimpleNLPService:
     def __init__(self):
-        # Lista básica de stopwords en español (sin necesidad de descargar)
+        self.default_responses = {
+            "SALUDO": ["¡Hola! ¿En qué puedo ayudarte?"],
+            "DESPEDIDA": ["¡Hasta luego! Que tengas un buen día."],
+            "CONSULTA_DEUDA": ["Te ayudo a consultar tu deuda."],
+            "INTENCION_PAGO": ["Perfecto, te muestro las opciones de pago."],
+            "SOLICITUD_PLAN": ["Te propongo excelentes planes de pago."],
+            "CONFIRMACION": ["Perfecto, procedo con tu solicitud."],
+            "RECHAZO": ["Entiendo, ¿hay algo más en lo que pueda ayudarte?"]
+        }
+        
         self.stop_words = {
             'a', 'al', 'algo', 'algunas', 'algunos', 'ante', 'antes', 'como', 'con', 
             'contra', 'cual', 'cuando', 'de', 'del', 'desde', 'donde', 'durante', 'e',
@@ -61,6 +99,103 @@ class SimpleNLPService:
         
         # Definición de patrones por defecto (si no se puede acceder a la BD)
         self._definir_patrones_por_defecto()
+        
+        self._load_model()
+    def _load_model(self):
+        """Cargar modelo ML automáticamente"""
+        try:
+            from joblib import load
+            
+            # Buscar modelo más reciente
+            model_path = obtener_modelo_mas_reciente()
+            
+            if model_path and os.path.exists(model_path):
+                self.model = load(model_path)
+                print(f"✅ Modelo ML cargado: {model_path}")
+            else:
+                print("⚠️ No se encontró modelo ML, usando clasificación por reglas")
+                self.model = None
+                
+        except Exception as e:
+            print(f"❌ Error cargando modelo ML: {e}")
+            self.model = None
+
+    def predict(self, text: str) -> dict:
+        """Predecir intención del texto"""
+        try:
+            if self.model is None:
+                # Clasificación por reglas si no hay modelo
+                return self._rule_based_classification(text)
+            
+            # Usar modelo ML
+            text_clean = self._clean_text(text)
+            
+            if not text_clean:
+                return {"intention": "DESCONOCIDA", "confidence": 0.0}
+            
+            # Predecir
+            prediction = self.model.predict([text_clean])[0]
+            probabilities = self.model.predict_proba([text_clean])[0]
+            confidence = max(probabilities)
+            
+            print(f"🤖 ML procesó '{text}' → {prediction} (confianza: {confidence:.2f})")
+            
+            return {
+                "intention": prediction,
+                "confidence": float(confidence)
+            }
+            
+        except Exception as e:
+            print(f"❌ Error en predicción ML: {e}")
+            return self._rule_based_classification(text)
+    
+    def _clean_text(self, text: str) -> str:
+        """Limpiar texto para ML (igual que en entrenamiento)"""
+        if not text:
+            return ""
+        
+        import re
+        import string
+        
+        text = str(text).lower().strip()
+        text = re.sub(r'[^\w\s\d]', ' ', text)
+        
+        # Stopwords mínimas
+        stopwords = {'el', 'la', 'de', 'que', 'y', 'a', 'en', 'un', 'se', 'del', 'los', 'las'}
+        palabras = [w for w in text.split() if w not in stopwords and len(w) > 1]
+        
+        return " ".join(palabras)
+    
+    def _rule_based_classification(self, text: str) -> dict:
+        """Clasificación por reglas como backup"""
+        text_lower = text.lower()
+        
+        # Reglas específicas para casos críticos
+        if any(word in text_lower for word in ["solicitar descuento", "descuento", "rebaja", "promoción"]):
+            return {"intention": "SOLICITUD_PLAN", "confidence": 0.9}
+        
+        if any(word in text_lower for word in ["ver opciones", "opciones de pago", "formas de pago"]):
+            return {"intention": "INTENCION_PAGO", "confidence": 0.9}
+        
+        if re.search(r'\b\d{7,12}\b', text):
+            return {"intention": "IDENTIFICACION", "confidence": 0.95}
+        
+        if any(word in text_lower for word in ["hola", "buenos días", "buenas tardes"]):
+            return {"intention": "SALUDO", "confidence": 0.9}
+        
+        if any(word in text_lower for word in ["sí", "si", "acepto", "confirmo", "ok"]):
+            return {"intention": "CONFIRMACION", "confidence": 0.9}
+        
+        if any(word in text_lower for word in ["no", "no puedo", "no me interesa"]):
+            return {"intention": "RECHAZO", "confidence": 0.9}
+        
+        if any(word in text_lower for word in ["cuanto debo", "mi deuda", "saldo"]):
+            return {"intention": "CONSULTA_DEUDA", "confidence": 0.9}
+        
+        if any(word in text_lower for word in ["quiero pagar", "realizar pago", "pagar"]):
+            return {"intention": "INTENCION_PAGO", "confidence": 0.9}
+        
+        return {"intention": "DESCONOCIDA", "confidence": 0.0}
     
     def _definir_patrones_por_defecto(self):
         """Define patrones por defecto para usar si no hay acceso a la BD"""
