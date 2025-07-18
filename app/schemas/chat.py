@@ -1,11 +1,10 @@
-# app/schemas/chat.py
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
 class ChatRequest(BaseModel):
     user_id: int
     message: Optional[str] = None
-    text: Optional[str] = None  # Para compatibilidad
+    text: Optional[str] = None 
     conversation_id: Optional[int] = None
     button_selected: Optional[str] = None
     intention: Optional[str] = None
@@ -55,7 +54,6 @@ class CedulaTestResponse(BaseModel):
     banco: Optional[str] = None
     mensaje: str
     
-# Schemas para configuración admin
 class ConfiguracionEstado(BaseModel):
     nombre: str
     mensaje_template: str

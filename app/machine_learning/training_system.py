@@ -28,7 +28,6 @@ class TrainingMapManager:
         self.maps_dir = Path("data/training_maps")
         self.maps_dir.mkdir(parents=True, exist_ok=True)
         
-        # Estructura de mapas
         self.intention_map = {}
         self.state_transitions = {}
         self.response_templates = {}
@@ -56,10 +55,8 @@ class TrainingMapManager:
         try:
             print(f"📂 Cargando mapa desde Excel: {file_path}")
             
-            # Leer todas las hojas
             excel_data = pd.read_excel(file_path, sheet_name=None)
             
-            # Procesar cada hoja
             for sheet_name, df in excel_data.items():
                 sheet_lower = sheet_name.lower()
                 

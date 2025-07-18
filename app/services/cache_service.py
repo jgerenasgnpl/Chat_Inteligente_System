@@ -28,28 +28,26 @@ class RedisCacheService:
     def __init__(self):
         self.redis_client = None
         self.enabled = False
-        self.default_ttl = 3600  # 1 hora
-        self.compression_threshold = 1000  # Comprimir si > 1KB
+        self.default_ttl = 3600
+        self.compression_threshold = 1000
         
-        # Configuración desde variables de entorno
         self.host = os.getenv("REDIS_HOST", "localhost")
         self.port = int(os.getenv("REDIS_PORT", 6379))
         self.password = os.getenv("REDIS_PASSWORD", None)
         self.db = int(os.getenv("REDIS_DB", 0))
         
-        # Inicializar conexión
+
         self._initialize_connection()
     
     def _initialize_connection(self):
         """Inicializar conexión a Redis"""
         try:
-            # ✅ SOLO CLIENTE SINCRÓNICO - Sin aioredis
             self.redis_client = redis.Redis(
                 host=self.host,
                 port=self.port,
                 password=self.password,
                 db=self.db,
-                decode_responses=False,  # Para manejar bytes
+                decode_responses=False, 
                 socket_connect_timeout=5,
                 socket_timeout=5,
                 retry_on_timeout=True,
@@ -64,7 +62,6 @@ class RedisCacheService:
         except Exception as e:
             logger.warning(f"⚠️ Redis no disponible: {e}")
             self.enabled = False
-            # ✅ USAR CACHE EN MEMORIA COMO FALLBACK
             self._memory_cache = {}
             self._memory_cache_timestamps = {}
     
@@ -104,7 +101,6 @@ class RedisCacheService:
                 serialized_value = self._serialize_data(value)
                 ttl = ttl or self.default_ttl
                 
-                # Comprimir si es necesario
                 if len(serialized_value) > self.compression_threshold:
                     import gzip
                     serialized_value = gzip.compress(serialized_value)
@@ -119,14 +115,12 @@ class RedisCacheService:
             except Exception as e:
                 logger.error(f"❌ Error cache SET {key}: {e}")
         
-        # ✅ FALLBACK A MEMORIA
         return self._memory_set(key, value, ttl)
     
     def get(self, key: str) -> Optional[Any]:
         """Obtener valor del cache"""
         if self.enabled and self.redis_client:
             try:
-                # Verificar si está comprimido
                 compressed_key = f"{key}:compressed"
                 
                 data = self.redis_client.get(compressed_key)
@@ -146,8 +140,6 @@ class RedisCacheService:
                     
             except Exception as e:
                 logger.error(f"❌ Error cache GET {key}: {e}")
-        
-        # ✅ FALLBACK A MEMORIA
         return self._memory_get(key)
     
     def delete(self, key: str) -> bool:
@@ -164,7 +156,6 @@ class RedisCacheService:
             except Exception as e:
                 logger.error(f"❌ Error cache DELETE {key}: {e}")
         
-        # ✅ FALLBACK A MEMORIA
         return self._memory_delete(key)
     
     def exists(self, key: str) -> bool:
@@ -178,12 +169,8 @@ class RedisCacheService:
             except Exception as e:
                 logger.error(f"❌ Error cache EXISTS {key}: {e}")
         
-        # ✅ FALLBACK A MEMORIA
         return self._memory_exists(key)
     
-    # ========================================
-    # CACHE EN MEMORIA COMO FALLBACK
-    # ========================================
     
     def _memory_set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Cache en memoria como fallback"""
@@ -198,7 +185,7 @@ class RedisCacheService:
                 'ttl': ttl or self.default_ttl
             }
             
-            # Limpieza básica cada 100 entradas
+
             if len(self._memory_cache) > 100:
                 self._cleanup_memory_cache()
             
@@ -217,13 +204,12 @@ class RedisCacheService:
             
             if key not in self._memory_cache:
                 return None
-            
-            # Verificar TTL
+
             cache_info = self._memory_cache_timestamps.get(key)
             if cache_info:
                 elapsed = (datetime.now() - cache_info['timestamp']).total_seconds()
                 if elapsed > cache_info['ttl']:
-                    # Expirado
+
                     del self._memory_cache[key]
                     del self._memory_cache_timestamps[key]
                     return None
@@ -285,9 +271,6 @@ class RedisCacheService:
         except Exception as e:
             logger.error(f"❌ Error cleaning memory cache: {e}")
     
-    # ========================================
-    # MÉTODOS ESPECÍFICOS PARA EL SISTEMA
-    # ========================================
     
     def cache_client_data(self, cedula: str, client_data: Dict[str, Any], ttl: int = 7200) -> bool:
         """Cache datos de cliente (2 horas TTL)"""
@@ -376,10 +359,7 @@ class RedisCacheService:
         """Invalidar cache de cliente"""
         key = self._generate_key("client", cedula)
         return self.delete(key)
-    
-    # ========================================
-    # UTILIDADES Y ESTADÍSTICAS
-    # ========================================
+
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """Obtener estadísticas del cache"""
@@ -410,7 +390,6 @@ class RedisCacheService:
             except Exception as e:
                 logger.error(f"❌ Error obteniendo estadísticas: {e}")
         
-        # ✅ ESTADÍSTICAS DE MEMORIA
         if hasattr(self, '_memory_cache'):
             return {
                 "enabled": True,
@@ -450,7 +429,6 @@ class RedisCacheService:
             except Exception as e:
                 logger.error(f"❌ Error limpiando cache: {e}")
         
-        # ✅ LIMPIAR MEMORIA
         if hasattr(self, '_memory_cache'):
             self._memory_cache.clear()
             self._memory_cache_timestamps.clear()
@@ -477,36 +455,29 @@ class RedisCacheService:
             except Exception as e:
                 logger.error(f"❌ Error en limpieza: {e}")
         
-        # ✅ LIMPIAR MEMORIA
         if hasattr(self, '_memory_cache'):
             self._cleanup_memory_cache()
             return 1
         
         return 0
 
-# ========================================
-# DECORADOR PARA CACHE AUTOMÁTICO
-# ========================================
-
 def cache_result(prefix: str, ttl: int = 3600, key_func=None):
     """Decorador para cache automático de resultados de funciones"""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Generar clave de cache
+
             if key_func:
                 cache_key = key_func(*args, **kwargs)
             else:
                 key_data = f"{func.__name__}|{args}|{sorted(kwargs.items())}"
                 cache_key = cache_service._generate_key(prefix, key_data)
             
-            # Intentar obtener del cache
             cached_result = cache_service.get(cache_key)
             if cached_result is not None:
                 logger.debug(f"🎯 Cache hit para {func.__name__}")
                 return cached_result
             
-            # Ejecutar función y cachear resultado
             result = func(*args, **kwargs)
             
             if result is not None:
@@ -518,15 +489,7 @@ def cache_result(prefix: str, ttl: int = 3600, key_func=None):
         return wrapper
     return decorator
 
-# ========================================
-# INSTANCIA GLOBAL
-# ========================================
-
 cache_service = RedisCacheService()
-
-# ========================================
-# FUNCIONES DE UTILIDAD
-# ========================================
 
 def get_cache_service() -> RedisCacheService:
     """Obtener instancia del servicio de cache"""
@@ -543,6 +506,5 @@ def warm_up_cache():
     
     logger.info("🔥 Precalentando cache...")
     
-    # Aquí puedes agregar lógica para precargar datos frecuentes
     
     logger.info("✅ Cache precalentado")

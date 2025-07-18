@@ -18,15 +18,7 @@ import os
 warnings.filterwarnings('ignore')
 
 class TransformerIntentionClassifier:
-    """
-    🤖 CLASIFICADOR AVANZADO CON TRANSFORMERS
     
-    Características:
-    - Sentence-BERT para embeddings semánticos
-    - Clasificadores ensemble (RF + LR)
-    - Entrenamiento incremental
-    - Detección de intenciones en contexto
-    """
     
     def __init__(self, db_session, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"):
         self.db = db_session
@@ -37,10 +29,7 @@ class TransformerIntentionClassifier:
         self.confidence_threshold = 0.6
         self.feature_cache = {}
         
-        # Inicializar modelo
         self._initialize_transformer_model()
-        
-        # Patrones específicos para cobranza (backup)
         self.pattern_rules = {
             'IDENTIFICACION': [
                 r'\b\d{7,12}\b',
@@ -61,9 +50,7 @@ class TransformerIntentionClassifier:
         }
     
     def _initialize_transformer_model(self):
-        """✅ CORREGIDO: Inicialización robusta con fallbacks"""
         try:
-            # Verificar e instalar dependencias
             try:
                 from sentence_transformers import SentenceTransformer
                 print(f"✅ sentence-transformers disponible")
@@ -72,8 +59,6 @@ class TransformerIntentionClassifier:
                 print("💡 Instalando: pip install sentence-transformers")
                 os.system("pip install sentence-transformers")
                 from sentence_transformers import SentenceTransformer
-            
-            # Cargar modelo con reintentos
             max_retries = 3
             for attempt in range(max_retries):
                 try:
@@ -95,29 +80,23 @@ class TransformerIntentionClassifier:
             self.sentence_model = None
     
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Generar embeddings usando Sentence-BERT"""
         if self.sentence_model is None:
             # Fallback a embeddings simples
             return self._generate_simple_embeddings(texts)
         
         try:
-            # Limpiar textos
             cleaned_texts = [self._clean_text(text) for text in texts]
-            
-            # Generar embeddings
             embeddings = self.sentence_model.encode(
                 cleaned_texts,
                 normalize_embeddings=True,
                 show_progress_bar=len(texts) > 100
             )
-            
             return embeddings
         except Exception as e:
             print(f"⚠️ Error generando embeddings: {e}")
             return self._generate_simple_embeddings(texts)
     
     def _generate_simple_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Fallback: embeddings simples con TF-IDF"""
         from sklearn.feature_extraction.text import TfidfVectorizer
         
         if not hasattr(self, '_simple_vectorizer'):
@@ -133,27 +112,18 @@ class TransformerIntentionClassifier:
             return self._simple_vectorizer.transform(cleaned_texts).toarray()
     
     def _clean_text(self, texto: str) -> str:
-        """Limpiar texto para embeddings"""
         if not texto or pd.isna(texto):
             return ""
-        
         texto = str(texto).lower().strip()
-        
-        # Preservar números importantes (cédulas)
         texto = re.sub(r'[^\w\s\d]', ' ', texto)
-        
-        # Normalizar espacios
         texto = re.sub(r'\s+', ' ', texto).strip()
-        
         return texto
     
     def load_training_data_enhanced(self) -> pd.DataFrame:
-        """Cargar datos de entrenamiento desde múltiples fuentes"""
         print("📂 Cargando datos de entrenamiento desde BD...")
         
         all_data = []
         
-        # 1. Datos etiquetados de tabla datos_entrenamiento
         try:
             query_labeled = text("""
                 SELECT 
@@ -181,7 +151,6 @@ class TransformerIntentionClassifier:
         except Exception as e:
             print(f"⚠️ Error cargando datos etiquetados: {e}")
         
-        # 2. Datos inferidos de conversaciones reales
         try:
             query_conversations = text("""
                 SELECT DISTINCT
@@ -217,7 +186,7 @@ class TransformerIntentionClassifier:
         except Exception as e:
             print(f"⚠️ Error cargando datos de conversaciones: {e}")
         
-        # 3. Datos base (si no hay suficientes datos)
+        # Datos base (si no hay suficientes datos)
         if len(all_data) < 100:
             base_data = self._generate_base_training_data()
             all_data.extend(base_data)
@@ -236,7 +205,6 @@ class TransformerIntentionClassifier:
         return df
     
     def _generate_base_training_data(self) -> List[Dict]:
-        """Generar datos base para entrenar"""
         base_examples = [
             # IDENTIFICACION
             {"texto": "mi cedula es 1020428633", "intencion": "IDENTIFICACION", "peso": 1.0},
@@ -279,7 +247,6 @@ class TransformerIntentionClassifier:
             {"texto": "adios", "intencion": "DESPEDIDA", "peso": 1.0}
         ]
         
-        # Agregar contexto y fuente
         for example in base_examples:
             example['contexto'] = ''
             example['fuente'] = 'base'
@@ -287,7 +254,6 @@ class TransformerIntentionClassifier:
         return base_examples
     
     def train_enhanced_model(self) -> Dict:
-        """Entrenar modelo mejorado con embeddings"""
         print("🚀 Iniciando entrenamiento con Transformers...")
         
         # Cargar datos
@@ -398,9 +364,7 @@ class TransformerIntentionClassifier:
         }
     
     def load_model(self, model_path: str = None):
-        """Cargar modelo entrenado"""
         if not model_path:
-            # Buscar modelo más reciente
             try:
                 query = text("""
                     SELECT TOP 1 ruta_modelo 
@@ -435,7 +399,6 @@ class TransformerIntentionClassifier:
         return False
     
     def predict_intention(self, mensaje: str, context: Dict = None) -> Dict:
-        """Predecir intención con Transformers"""
         if not self.classifier:
             return {
                 "intencion": "DESCONOCIDA",
@@ -444,27 +407,25 @@ class TransformerIntentionClassifier:
             }
         
         try:
-            # 1. Verificar reglas de alta prioridad
             rule_result = self._apply_priority_rules(mensaje, context)
             if rule_result['confianza'] > 0.9:
                 return rule_result
             
-            # 2. Generar embedding
+
             embedding = self.generate_embeddings([mensaje])
             
-            # 3. Predicciones del ensemble
+
             rf_proba = self.classifier['rf'].predict_proba(embedding)[0]
             lr_proba = self.classifier['lr'].predict_proba(embedding)[0]
             
-            # 4. Combinar probabilidades (promedio ponderado)
+
             ensemble_proba = (rf_proba * 0.6 + lr_proba * 0.4)
             
-            # 5. Obtener mejor predicción
+
             max_idx = np.argmax(ensemble_proba)
             intencion = self.classes[max_idx]
             confianza = ensemble_proba[max_idx]
             
-            # 6. Verificar threshold
             if confianza < self.confidence_threshold:
                 intencion = "DESCONOCIDA"
             
@@ -482,7 +443,6 @@ class TransformerIntentionClassifier:
             return self._apply_priority_rules(mensaje, context)
     
     def _apply_priority_rules(self, mensaje: str, context: Dict = None) -> Dict:
-        """Aplicar reglas de alta prioridad"""
         mensaje_lower = mensaje.lower()
         
         for intencion, patterns in self.pattern_rules.items():
@@ -502,9 +462,7 @@ class TransformerIntentionClassifier:
         }
     
     def _register_model_in_db(self, model_path: str, accuracy: float, samples: int):
-        """Registrar modelo en BD"""
         try:
-            # Desactivar modelos anteriores del mismo tipo
             update_query = text("""
                 UPDATE modelos_ml 
                 SET activo = 0 
@@ -512,7 +470,7 @@ class TransformerIntentionClassifier:
             """)
             self.db.execute(update_query)
             
-            # Insertar nuevo modelo
+
             insert_query = text("""
                 INSERT INTO modelos_ml 
                 (nombre, tipo, ruta_modelo, accuracy, ejemplos_entrenamiento, activo)
@@ -533,19 +491,13 @@ class TransformerIntentionClassifier:
             print(f"⚠️ Error registrando modelo: {e}")
             self.db.rollback()
 
-# ==========================================
-# ENTRENAMIENTO INCREMENTAL
-# ==========================================
 
 class IncrementalTrainer:
-    """Entrenador incremental para mejorar el modelo con feedback"""
-    
     def __init__(self, db_session):
         self.db = db_session
         self.classifier = TransformerIntentionClassifier(db_session)
     
     def add_training_example(self, texto: str, intencion_real: str, confianza: float = 1.0):
-        """Agregar ejemplo de entrenamiento"""
         try:
             insert_query = text("""
                 INSERT INTO datos_entrenamiento 
@@ -566,9 +518,8 @@ class IncrementalTrainer:
             return False
     
     def retrain_if_needed(self, min_new_examples: int = 20) -> bool:
-        """Reentrenar si hay suficientes ejemplos nuevos"""
         try:
-            # Contar ejemplos nuevos sin usar en entrenamiento
+
             query = text("""
                 SELECT COUNT(*) 
                 FROM datos_entrenamiento 
@@ -589,10 +540,7 @@ class IncrementalTrainer:
             print(f"❌ Error en reentrenamiento: {e}")
             return False
 
-# ==========================================
-# FACTORY FUNCTION
-# ==========================================
+
 
 def create_transformer_classifier(db_session) -> TransformerIntentionClassifier:
-    """Factory para crear clasificador mejorado"""
     return TransformerIntentionClassifier(db_session)

@@ -15,7 +15,6 @@ class SystemMonitor:
     
     def __init__(self):
         self.metrics = {
-            # Contadores por sistema
             'rule_hits': 0,
             'ml_hits': 0,
             'openai_hits': 0,
@@ -23,7 +22,6 @@ class SystemMonitor:
             'total_requests': 0,
             'errors': 0,
             
-            # Tiempos de respuesta
             'response_times': {
                 'rules': deque(maxlen=100),
                 'ml': deque(maxlen=100),
@@ -31,14 +29,12 @@ class SystemMonitor:
                 'total': deque(maxlen=100)
             },
             
-            # Tasas de éxito
             'success_rates': {
                 'rules': deque(maxlen=100),
                 'ml': deque(maxlen=100),
                 'openai': deque(maxlen=100)
             },
             
-            # Cache statistics
             'cache_stats': {
                 'hits': 0,
                 'misses': 0,
@@ -47,13 +43,12 @@ class SystemMonitor:
             }
         }
         
-        # Alertas
         self.alerts = []
         self.alert_thresholds = {
-            'avg_response_time': 2000,  # 2s
-            'error_rate': 0.1,          # 10%
-            'ml_confidence_drop': 0.5,   # 50%
-            'cache_hit_rate': 0.3       # 30%
+            'avg_response_time': 2000,
+            'error_rate': 0.1,         
+            'ml_confidence_drop': 0.5,
+            'cache_hit_rate': 0.3  
         }
         
         self.lock = threading.Lock()
@@ -65,7 +60,6 @@ class SystemMonitor:
         with self.lock:
             self.metrics['total_requests'] += 1
             
-            # Incrementar contador por método
             if method == 'REGLA_CRITICA':
                 self.metrics['rule_hits'] += 1
                 self.metrics['response_times']['rules'].append(response_time_ms)
@@ -84,14 +78,11 @@ class SystemMonitor:
             elif method == 'CACHE':
                 self.metrics['cache_hits'] += 1
             
-            # Error tracking
             if not success:
                 self.metrics['errors'] += 1
             
-            # Tiempo total
             self.metrics['response_times']['total'].append(response_time_ms)
             
-            # Verificar alertas
             self._check_alerts()
     
     def record_cache_event(self, event_type: str):
@@ -114,17 +105,14 @@ class SystemMonitor:
         with self.lock:
             total = max(self.metrics['total_requests'], 1)
             
-            # Calcular promedios
             avg_times = {}
             for system, times in self.metrics['response_times'].items():
                 avg_times[system] = sum(times) / len(times) if times else 0
             
-            # Tasas de éxito
             success_rates = {}
             for system, rates in self.metrics['success_rates'].items():
                 success_rates[system] = sum(rates) / len(rates) if rates else 0
             
-            # Cache hit rate
             cache_total = self.metrics['cache_stats']['hits'] + self.metrics['cache_stats']['misses']
             cache_hit_rate = self.metrics['cache_stats']['hits'] / max(cache_total, 1)
             
@@ -146,31 +134,27 @@ class SystemMonitor:
                     'success_rates': success_rates
                 },
                 'cache': self.metrics['cache_stats'],
-                'alerts': self.alerts[-10:],  # Últimas 10 alertas
+                'alerts': self.alerts[-10:],
                 'timestamp': datetime.utcnow().isoformat()
             }
     
     def _check_alerts(self):
         """Verificar condiciones de alerta"""
-        # Verificar tiempo de respuesta promedio
         if self.metrics['response_times']['total']:
             avg_time = sum(self.metrics['response_times']['total']) / len(self.metrics['response_times']['total'])
             if avg_time > self.alert_thresholds['avg_response_time']:
                 self._add_alert('HIGH_RESPONSE_TIME', f'Tiempo promedio: {avg_time:.1f}ms')
         
-        # Verificar tasa de error
         if self.metrics['total_requests'] > 10:
             error_rate = self.metrics['errors'] / self.metrics['total_requests']
             if error_rate > self.alert_thresholds['error_rate']:
                 self._add_alert('HIGH_ERROR_RATE', f'Tasa de error: {error_rate:.1%}')
         
-        # Verificar confianza ML
         if self.metrics['success_rates']['ml']:
             avg_confidence = sum(self.metrics['success_rates']['ml']) / len(self.metrics['success_rates']['ml'])
             if avg_confidence < self.alert_thresholds['ml_confidence_drop']:
                 self._add_alert('LOW_ML_CONFIDENCE', f'Confianza ML: {avg_confidence:.2f}')
         
-        # Verificar cache hit rate
         cache_total = self.metrics['cache_stats']['hits'] + self.metrics['cache_stats']['misses']
         if cache_total > 20:
             hit_rate = self.metrics['cache_stats']['hits'] / cache_total
@@ -185,7 +169,6 @@ class SystemMonitor:
             'timestamp': datetime.utcnow().isoformat()
         }
         
-        # Evitar alertas duplicadas recientes
         recent_alerts = [a for a in self.alerts[-5:] if a['type'] == alert_type]
         if not recent_alerts:
             self.alerts.append(alert)
@@ -196,16 +179,8 @@ class SystemMonitor:
         with self.lock:
             self.__init__()
 
-# ==========================================
-# MONITOR GLOBAL
-# ==========================================
 
-# Instancia global del monitor
 system_monitor = SystemMonitor()
-
-# ==========================================
-# DECORADOR PARA MONITOREO AUTOMÁTICO
-# ==========================================
 
 def monitor_execution(method_name: str = "UNKNOWN"):
     """Decorador para monitorear automáticamente las funciones"""
@@ -218,7 +193,6 @@ def monitor_execution(method_name: str = "UNKNOWN"):
             try:
                 result = func(*args, **kwargs)
                 
-                # Extraer confianza si está en el resultado
                 if isinstance(result, dict):
                     confidence = result.get('confianza', result.get('confidence', 0.0))
                 
@@ -236,14 +210,9 @@ def monitor_execution(method_name: str = "UNKNOWN"):
         return wrapper
     return decorator
 
-# ==========================================
-# FUNCIONES DE UTILIDAD PARA BD
-# ==========================================
-
 def save_metrics_to_db(db: Session, metrics: Dict[str, Any]):
     """Guardar métricas en base de datos"""
     try:
-        # Guardar en tabla performance_metrics (si existe)
         query = text("""
             INSERT INTO performance_metrics (
                 metric_date, total_requests, error_rate, 
@@ -315,10 +284,6 @@ def get_performance_trends(db: Session, days: int = 7) -> Dict[str, Any]:
         logger.error(f"❌ Error obteniendo tendencias: {e}")
         return {'trends': [], 'error': str(e)}
 
-# ==========================================
-# HEALTH CHECK
-# ==========================================
-
 def system_health_check(db: Session) -> Dict[str, Any]:
     """Health check completo del sistema"""
     
@@ -330,11 +295,9 @@ def system_health_check(db: Session) -> Dict[str, Any]:
     }
     
     try:
-        # Check BD
         db.execute(text("SELECT 1"))
         health['components']['database'] = {'status': 'healthy'}
-        
-        # Check tablas críticas
+
         tables_to_check = ['conversations', 'Estados_Conversacion', 'datos_entrenamiento']
         for table in tables_to_check:
             count = db.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
@@ -343,7 +306,6 @@ def system_health_check(db: Session) -> Dict[str, Any]:
                 'count': count
             }
         
-        # Check modelos ML
         import os
         models_dir = "models"
         if os.path.exists(models_dir):
@@ -355,7 +317,6 @@ def system_health_check(db: Session) -> Dict[str, Any]:
         else:
             health['components']['ml_models'] = {'status': 'error', 'message': 'Models directory not found'}
         
-        # Check OpenAI
         from app.core.config import settings
         if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY.startswith('sk-'):
             health['components']['openai'] = {'status': 'healthy'}
@@ -368,10 +329,6 @@ def system_health_check(db: Session) -> Dict[str, Any]:
         logger.error(f"❌ Error en health check: {e}")
     
     return health
-
-# ==========================================
-# EJEMPLO DE USO EN FLOW MANAGER
-# ==========================================
 
 """
 # En flow_manager.py, agregar estas líneas:

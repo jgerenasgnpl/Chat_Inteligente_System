@@ -44,7 +44,7 @@ class CondicionesService:
         mensaje = contexto.get('mensaje', '').lower()
         plan_seleccionado = contexto.get('plan_seleccionado')
         
-        # Palabras clave que indican selección de plan
+
         palabras_plan = ['1', '2', '3', 'uno', 'dos', 'tres', 'primero', 'segundo', 'tercero', 
                         'pago único', 'cuotas', 'plan']
         
@@ -69,7 +69,6 @@ class CondicionesService:
         documento = contexto.get('documento', '')
         mensaje = contexto.get('mensaje', '')
         
-        # Buscar cédula en el mensaje (formato colombiano)
         import re
         patron_cedula = r'\b\d{7,10}\b'
         

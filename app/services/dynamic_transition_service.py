@@ -85,6 +85,38 @@ class DynamicTransitionService:
             logger.warning(f"⚠️ Error cargando ML mappings: {e}")
             self.ml_mappings = {}
     
+    def _load_ml_mappings(self):
+        """Cargar mapeos ML → Condiciones BD"""
+        try:
+            query = text("""
+                SELECT ml_intention, bd_condition, confidence_threshold, priority
+                FROM ml_intention_mappings 
+                WHERE active = 1
+                ORDER BY priority ASC, confidence_threshold DESC
+            """)
+            
+            self.ml_mappings = {}
+            result = self.db.execute(query)
+            rows = result.fetchall()
+            
+            print(f"🔍 Cargando ML mappings... Encontradas {len(rows)} filas")
+            
+            for row in rows:
+                self.ml_mappings[row[0]] = {
+                    'bd_condition': row[1],
+                    'confidence_threshold': row[2],
+                    'priority': row[3]
+                }
+                print(f"   ✅ {row[0]} → {row[1]} (confianza: {row[2]})")
+            
+            print(f"✅ ML mappings cargados: {len(self.ml_mappings)} elementos")
+                    
+        except Exception as e:
+            print(f"❌ Error cargando ML mappings: {e}")
+            import traceback
+            traceback.print_exc()
+            self.ml_mappings = {}
+
     def _load_keyword_patterns(self):
         """Cargar patrones de palabras clave"""
         try:

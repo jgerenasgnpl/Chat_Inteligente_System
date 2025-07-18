@@ -5,8 +5,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from typing import Callable, Dict, Any
 import logging
-
-# Import del timeout manager (debe estar en el mismo directorio)
 from app.services.conversation_timeout import ConversationTimeoutManager
 
 logger = logging.getLogger(__name__)
@@ -25,8 +23,6 @@ class ConversationScheduler:
         self.scheduler = BackgroundScheduler()
         self.session_factory = session_factory
         self._running = False
-        
-        # Configurar logging para el scheduler
         logging.getLogger('apscheduler').setLevel(logging.WARNING)
         
     def start_scheduler(self):
@@ -36,27 +32,22 @@ class ConversationScheduler:
             return
             
         try:
-            # 🕐 Cada hora: proceso de auto-cierre
             self.scheduler.add_job(
                 func=self.run_auto_close_process,
-                trigger=CronTrigger(minute=0),  # Cada hora en punto
+                trigger=CronTrigger(minute=0),
                 id='auto_close_conversations',
                 name='Auto-close expired conversations',
                 replace_existing=True,
-                max_instances=1  # Evitar ejecuciones concurrentes
+                max_instances=1
             )
-            
-            # 🕒 Cada 4 horas: limpieza de logs antiguos  
             self.scheduler.add_job(
                 func=self.cleanup_old_data,
-                trigger=CronTrigger(hour='*/4', minute=5),  # 5 min después de la hora
+                trigger=CronTrigger(hour='*/4', minute=5),
                 id='cleanup_old_data',
                 name='Cleanup old conversation data',
                 replace_existing=True,
                 max_instances=1
             )
-            
-            # 🌅 Cada día a las 6 AM: archivado de conversaciones
             self.scheduler.add_job(
                 func=self.archive_old_conversations,
                 trigger=CronTrigger(hour=6, minute=0),
@@ -65,8 +56,6 @@ class ConversationScheduler:
                 replace_existing=True,
                 max_instances=1
             )
-            
-            # 📊 Cada día a las 7 AM: generar métricas diarias
             self.scheduler.add_job(
                 func=self.generate_daily_metrics,
                 trigger=CronTrigger(hour=7, minute=0),
@@ -80,8 +69,6 @@ class ConversationScheduler:
             self._running = True
             logger.info("✅ Scheduler de conversaciones iniciado exitosamente")
             print("✅ Scheduler de conversaciones iniciado")
-            
-            # Mostrar próximas ejecuciones
             self._log_next_executions()
             
         except Exception as e:
@@ -148,8 +135,7 @@ class ConversationScheduler:
             
             result2 = db.execute(cleanup_metrics_query, {"cutoff_date": cutoff_date})
             
-            # 3. Comprimir mensajes antiguos (opcional)
-            # Solo mantener primer y último mensaje de conversaciones muy antiguas
+            # 3. Comprimir mensajes antiguos
             
             db.commit()
             
@@ -180,10 +166,8 @@ class ConversationScheduler:
         try:
             db = self.session_factory()
             
-            # Fecha de corte: 30 días después del cierre
             cutoff_date = datetime.now() - timedelta(days=30)
             
-            # Buscar conversaciones para archivar
             conversations_to_archive = db.execute(text("""
                 SELECT id FROM conversations 
                 WHERE is_active = 0 
@@ -197,7 +181,6 @@ class ConversationScheduler:
             
             for conv_row in conversations_to_archive:
                 try:
-                    # Usar procedimiento almacenado para archivar
                     result = db.execute(text("""
                         EXEC sp_archive_conversation 
                         @conversation_id = :conv_id,
@@ -242,7 +225,6 @@ class ConversationScheduler:
             
             yesterday = (datetime.now() - timedelta(days=1)).date()
             
-            # Verificar si ya existen métricas para ayer
             existing_metrics = db.execute(text("""
                 SELECT COUNT(*) FROM conversation_metrics 
                 WHERE metric_date = :date
@@ -252,7 +234,6 @@ class ConversationScheduler:
                 logger.info("📊 Métricas ya existen para esta fecha")
                 return {"message": "Metrics already exist for this date"}
             
-            # Generar métricas por conversación del día anterior
             metrics_query = text("""
                 INSERT INTO conversation_metrics (
                     conversation_id, metric_date, total_messages, user_messages, 
@@ -393,7 +374,6 @@ class ConversationScheduler:
         """Reiniciar scheduler"""
         logger.info("🔄 Reiniciando scheduler...")
         self.stop_scheduler()
-        # Pequeña pausa para asegurar que se detiene completamente
         import time
         time.sleep(1)
         self.start_scheduler()
@@ -404,21 +384,13 @@ class ConversationScheduler:
             try:
                 self.stop_scheduler()
             except:
-                pass  # Ignorar errores en destructor
+                pass 
 
 
-# ==========================================
-# FACTORY FUNCTIONS
-# ==========================================
 
 def create_conversation_scheduler(session_factory: Callable[[], Session]) -> ConversationScheduler:
     """Factory function para crear el scheduler"""
     return ConversationScheduler(session_factory)
-
-
-# ==========================================
-# SINGLETON PARA USO GLOBAL (OPCIONAL)
-# ==========================================
 
 _global_scheduler: ConversationScheduler = None
 

@@ -3,7 +3,7 @@ from typing import Optional
 from datetime import datetime
 
 class MessageBase(BaseModel):
-    sender_type: str  # "user" o "system"
+    sender_type: str 
     text_content: str
     button_selected: Optional[str] = None
     previous_state: Optional[str] = None

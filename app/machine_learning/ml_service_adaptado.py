@@ -7,16 +7,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 class MLConversationEngineAdaptado:
-    """MLConversationEngine adaptado a estructura existente"""
-    
     _instance = None
     _lock = threading.Lock()
     _cache = {}
     _cache_timestamps = {}
-    _cache_ttl = 3600  # 1 hora
-    
+    _cache_ttl = 3600
     def __new__(cls, db: Session = None):
-        """Singleton thread-safe"""
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -32,50 +28,34 @@ class MLConversationEngineAdaptado:
                     self.ml_disponible = True
                     self._performance_log = []
                     self._initialized = True
-                    
                     try:
-                        # Verificar si hay modelo ML registrado
                         if not self._verify_model_available():
                             self._register_basic_model()
-                            
                     except Exception as e:
                         print(f"⚠️ ML no disponible: {e}")
                         self.ml_disponible = False
     
     def analizar_mensaje_completo(self, mensaje: str, context_data: dict, estado_actual: str) -> dict:
-        """Análisis completo adaptado"""
         start_time = time.time()
-        
         try:
-            # Verificar cache
             cache_key = self._generate_cache_key(mensaje, context_data, estado_actual)
             cached_result = self._get_from_cache(cache_key)
-            
             if cached_result:
                 self._log_performance("cache_hit", time.time() - start_time)
                 return cached_result
-            
-            # Análisis con datos reales
             if self.ml_disponible:
                 resultado = self._analizar_con_datos_reales(mensaje, context_data, estado_actual)
             else:
                 resultado = self._analizar_fallback_adaptado(mensaje, context_data, estado_actual)
-            
-            # Guardar en cache
             self._save_to_cache(cache_key, resultado)
-            
-            # Log performance
             execution_time = time.time() - start_time
             self._log_performance("full_analysis", execution_time)
-            
             return resultado
-            
         except Exception as e:
             print(f"❌ Error en análisis ML: {e}")
             return self._analizar_fallback_adaptado(mensaje, context_data, estado_actual)
     
     def _analizar_con_datos_reales(self, mensaje: str, context_data: dict, estado_actual: str) -> dict:
-        """Análisis usando datos reales de ConsolidadoCampañasNatalia"""
         try:
             # 1. Predicción de intención básica
             intencion, confianza = self._predecir_intencion_basica(mensaje)
@@ -106,7 +86,6 @@ class MLConversationEngineAdaptado:
             return self._analizar_fallback_adaptado(mensaje, context_data, estado_actual)
     
     def _predecir_intencion_basica(self, mensaje: str) -> tuple:
-        """Predicción básica de intención"""
         mensaje_lower = mensaje.lower() if mensaje else ""
         
         # Patrones específicos para cobranza
@@ -131,7 +110,6 @@ class MLConversationEngineAdaptado:
         return "DESCONOCIDA", 0.0
     
     def _analizar_perfil_con_datos_reales(self, context_data: dict) -> dict:
-        """Análisis de perfil usando datos reales financieros"""
         try:
             saldo_total = float(context_data.get("saldo_total", 0))
             capital = float(context_data.get("capital", 0))
@@ -211,7 +189,6 @@ class MLConversationEngineAdaptado:
             return {"propension_pago": 0.5, "segmento": "MEDIO_POTENCIAL"}
     
     def _recomendar_estrategia_por_perfil(self, propension: float, tipo_cartera: str) -> str:
-        """Recomendar estrategia basada en perfil"""
         if propension > 0.7:
             return "AGRESIVA_POSITIVA"
         elif propension < 0.3 or tipo_cartera == "CASTIGADA":
@@ -220,7 +197,6 @@ class MLConversationEngineAdaptado:
             return "BALANCEADA"
     
     def _determinar_estrategia_con_datos(self, intencion: str, perfil: dict, context_data: dict) -> dict:
-        """Determinar estrategia usando datos financieros"""
         propension = perfil["propension_pago"]
         categoria_monto = perfil.get("categoria_monto", "MEDIO")
         tipo_cartera = perfil.get("tipo_cartera", "REGULAR")
@@ -279,7 +255,6 @@ class MLConversationEngineAdaptado:
         }
     
     def _generar_respuesta_personalizada(self, estrategia: dict, context_data: dict, mensaje_usuario: str) -> str:
-        """Generar respuesta personalizada con datos reales"""
         
         if estrategia["tipo"] == "AGRESIVA_POSITIVA":
             nombre = context_data.get('Nombre_del_cliente', 'estimado cliente')
@@ -327,7 +302,6 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
         return None
     
     def _format_currency(self, amount) -> str:
-        """Formatear moneda"""
         try:
             if isinstance(amount, str):
                 amount = float(amount.replace(",", "").replace("$", ""))
@@ -336,7 +310,6 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
             return "$0"
     
     def _analizar_fallback_adaptado(self, mensaje: str, context_data: dict, estado_actual: str) -> dict:
-        """Análisis fallback adaptado"""
         intencion, confianza = self._predecir_intencion_basica(mensaje)
         
         # Determinar próximo estado basado en intención
@@ -364,7 +337,6 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
         }
     
     def _verify_model_available(self) -> bool:
-        """Verificar si hay modelo ML disponible"""
         try:
             query = text("SELECT COUNT(*) FROM modelos_ml WHERE activo = 1 AND tipo = 'intention_classifier'")
             count = self.db.execute(query).scalar()
@@ -373,7 +345,6 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
             return False
     
     def _register_basic_model(self):
-        """Registrar modelo básico"""
         try:
             query = text("""
                 INSERT INTO modelos_ml (nombre, tipo, ruta_modelo, accuracy, ejemplos_entrenamiento)
@@ -391,12 +362,10 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
             print(f"⚠️ Error registrando modelo: {e}")
     
     def _generate_cache_key(self, mensaje: str, context_data: dict, estado: str) -> str:
-        """Generar clave de cache"""
         content = f"{mensaje}|{estado}|{context_data.get('Nombre_del_cliente', '')}|{context_data.get('saldo_total', '')}"
         return hashlib.md5(content.encode()).hexdigest()
     
     def _get_from_cache(self, cache_key: str) -> Optional[dict]:
-        """Obtener del cache"""
         try:
             current_time = time.time()
             if (cache_key in self._cache and 
@@ -408,7 +377,6 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
             return None
     
     def _save_to_cache(self, cache_key: str, resultado: dict):
-        """Guardar en cache"""
         try:
             current_time = time.time()
             if len(self._cache) > 1000:
@@ -419,7 +387,6 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
             pass
     
     def _cleanup_cache(self):
-        """Limpiar cache"""
         try:
             current_time = time.time()
             expired_keys = [k for k, ts in self._cache_timestamps.items() 
@@ -431,7 +398,6 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
             pass
     
     def _log_performance(self, operacion: str, tiempo: float):
-        """Log de performance"""
         try:
             self._performance_log.append({
                 "operacion": operacion,
@@ -443,95 +409,3 @@ Tu tranquilidad financiera es importante para nosotros. ¿Te gustaría que conve
         except:
             pass
 
-# ================================================================================
-# ARCHIVO 3: Instrucciones de actualización de chat.py
-# ================================================================================
-
-print("""
-📋 INSTRUCCIONES PARA ACTUALIZAR chat.py:
-
-1. 📝 ACTUALIZAR IMPORTS:
-   # CAMBIAR:
-   from app.services.flow_manager import ConfigurableFlowManager
-   from app.machine_learning.ml_service import MLConversationEngine
-   
-   # POR:
-   from app.services.flow_manager_adaptado import ConfigurableFlowManagerAdaptado
-   from app.machine_learning.ml_service_adaptado import MLConversationEngineAdaptado
-
-2. 🔧 ACTUALIZAR ENDPOINT process_chat_message():
-   # CAMBIAR:
-   flow_manager = ConfigurableFlowManager(db)
-   ml_engine = MLConversationEngine(db)
-   
-   # POR:
-   flow_manager = ConfigurableFlowManagerAdaptado(db)
-   ml_engine = MLConversationEngineAdaptado(db)
-
-3. ✅ AGREGAR LOGGING MEJORADO:
-   # Al inicio del endpoint:
-   print(f"📩 Mensaje recibido: {message_content}")
-   print(f"👤 Usuario: {user_id}")
-   print(f"💬 Conversación: {conversation.id}")
-   
-   # Al final del endpoint:
-   print(f"✅ Respuesta enviada: {response.current_state}")
-   print(f"📊 Datos cliente: {bool(context_data.get('Nombre_del_cliente'))}")
-
-4. 🎯 EJEMPLO DE ENDPOINT ADAPTADO:
-   @router.post("/message", response_model=ChatResponse)
-   def process_chat_message(
-       request: ChatRequest,
-       db: Session = Depends(get_db),
-   ):
-       try:
-           user_id = request.user_id
-           message_content = request.message or request.text or ""
-           
-           print(f"📩 Mensaje: {message_content}")
-           
-           # Obtener/crear conversación
-           conversation = _get_or_create_conversation(db, user_id, request.conversation_id)
-           
-           # Usar managers adaptados
-           flow_manager = ConfigurableFlowManagerAdaptado(db)
-           
-           # Procesar mensaje
-           result = flow_manager.process_user_message(
-               conversation_id=conversation.id,
-               user_message=message_content,
-               current_state=conversation.current_state,
-               context_data=conversation.context_data or {}
-           )
-           
-           # Actualizar conversación
-           conversation = StateManager.update_conversation_state(
-               db=db,
-               conversation_id=conversation.id,
-               new_state=result["next_state"],
-               context_data=result["context_data"]
-           )
-           
-           print(f"✅ Estado: {result['next_state']}")
-           print(f"📊 Cliente encontrado: {result.get('datos_cliente_encontrados', False)}")
-           
-           return ChatResponse(
-               conversation_id=conversation.id,
-               message=result["message"],
-               current_state=result["next_state"],
-               buttons=result.get("buttons", []),
-               context_data=result["context_data"]
-           )
-           
-       except Exception as e:
-           print(f"❌ Error: {e}")
-           return ChatResponse(
-               conversation_id=1,
-               message="Disculpa los inconvenientes técnicos. ¿Podrías proporcionarme tu número de cédula?",
-               current_state="validar_documento",
-               buttons=[],
-               context_data={}
-           )
-
-¡Con estos cambios tendrás un sistema completamente adaptado a tu estructura existente!
-""")

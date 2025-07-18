@@ -3,10 +3,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 
-# PRIMERO: Base
-from app.db.base import Base
 
-# SEGUNDO: Engine
 odbc_str = (
     "DRIVER={ODBC Driver 17 for SQL Server};"
     "SERVER=172.18.79.20,1433;"
@@ -27,7 +24,6 @@ from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.message import Message
 
-# CUARTO: Funciones
 def get_db():
     """Generador de sesiones de BD"""
     db = SessionLocal()
@@ -51,7 +47,6 @@ def test_connection():
 def create_tables():
     """Crea las tablas en la BD"""
     try:
-        # ✅ IMPORTAR MODELOS AQUÍ - Después de crear Base
         from app.models.user import User
         from app.models.conversation import Conversation  
         from app.models.message import Message
@@ -67,7 +62,6 @@ def verify_tables():
     """Verifica que las tablas existan"""
     try:
         with engine.connect() as conn:
-            # Verificar si existe la tabla users
             result = conn.execute(text("""
                 SELECT COUNT(*) 
                 FROM INFORMATION_SCHEMA.TABLES 

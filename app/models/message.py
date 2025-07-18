@@ -14,8 +14,6 @@ class Message(Base):
     previous_state = Column(String(100), nullable=True)
     next_state = Column(String(100), nullable=True)
     timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
-    
-    # ✅ RELACIÓN CORREGIDA
     conversation = relationship("Conversation", back_populates="messages", lazy="select")
     
     def __repr__(self):

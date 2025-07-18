@@ -51,7 +51,6 @@ class AccionesService:
             plan_seleccionado = contexto.get('plan_seleccionado', 'plan_1')
             cliente_id = contexto.get('cliente_id')
             
-            # Registrar en base de datos
             insert_plan = text("""
                 INSERT INTO planes_pago (conversation_id, tipo_plan, cliente_id, fecha_creacion)
                 VALUES (:conversation_id, :tipo_plan, :cliente_id, GETDATE())
@@ -102,11 +101,10 @@ class AccionesService:
             saldo = contexto.get('saldo', 0)
             capacidad_pago = contexto.get('capacidad_pago', saldo * 0.1)
             
-            # Calcular opciones de pago
             propuesta = {
-                "pago_unico": saldo * 0.7,  # 30% descuento
-                "plan_2_cuotas": saldo * 0.5,  # Pago inicial 50%
-                "plan_6_cuotas": saldo / 6,  # Cuota mensual
+                "pago_unico": saldo * 0.7,  
+                "plan_2_cuotas": saldo * 0.5, 
+                "plan_6_cuotas": saldo / 6, 
                 "descuento_maximo": saldo * 0.3
             }
             
@@ -121,7 +119,6 @@ class AccionesService:
     
     def _enviar_recordatorio(self, contexto: Dict[str, Any]) -> Dict[str, Any]:
         """Envía recordatorio de pago"""
-        # Por ahora solo simulamos el envío
         return {
             "exito": True,
             "mensaje": "Recordatorio programado",

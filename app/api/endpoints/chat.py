@@ -1,17 +1,9 @@
-"""
-🎯 CHAT.PY COMPLETAMENTE CORREGIDO - VERSION FINAL
-- Sin código quemado - Todo dinámico desde contexto y ML
-- Lenguaje natural real funcionando
-- ML integrado correctamente con fallbacks
-- Sin dependencia de tablas que no existen
-"""
-
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from fastapi import status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.api.deps import get_db
 from app.schemas.chat import ChatRequest, ChatResponse, ConversationHistoryResponse, CedulaTestResponse, CedulaTestRequest
 from app.services.conversation_service import crear_conversation_service
@@ -29,10 +21,6 @@ import re
 load_dotenv()
 router = APIRouter(prefix="/chat", tags=["Chat"])
 logger = logging.getLogger("uvicorn.error")
-
-# ==========================================
-# 🧠 PROCESADOR INTELIGENTE SIN CODIGO QUEMADO
-# ==========================================
 
 class SmartLanguageProcessor:
     """
@@ -69,52 +57,449 @@ class SmartLanguageProcessor:
     
     def procesar_mensaje_inteligente(self, mensaje: str, contexto: Dict[str, Any], estado_actual: str) -> Dict[str, Any]:
         """
-        🎯 PROCESAMIENTO PRINCIPAL INTELIGENTE
-        1. Detección automática de cédulas (prioridad máxima)
-        2. Clasificación ML avanzada
-        3. Procesamiento contextual inteligente
-        4. OpenAI para casos complejos
+        🎯 PROCESAMIENTO PRINCIPAL INTELIGENTE - CONECTADO A SISTEMA DINÁMICO
         """
         
         mensaje_limpio = mensaje.strip().lower()
         print(f"🔍 Procesando: '{mensaje}' en estado '{estado_actual}'")
         
-        # ✅ 1. DETECCIÓN AUTOMÁTICA DE CÉDULAS (MÁXIMA PRIORIDAD)
         cedula_detectada = self._detectar_cedula_inteligente(mensaje)
         if cedula_detectada:
             return self._procesar_cedula_completa(cedula_detectada, contexto)
         
-        # ✅ 2. PROCESAMIENTO CON ML MEJORADO
-        if self.ml_service:
-            resultado_ml = self._clasificar_ml_avanzado(mensaje, contexto, estado_actual)
-            if resultado_ml['usar_resultado']:
-                return resultado_ml
+        try:
+            from app.services.dynamic_transition_service import create_dynamic_transition_service
+            dynamic_service = create_dynamic_transition_service(self.db)
+            
+            # Crear resultado ML
+            ml_result = {}
+            if self.ml_service:
+                ml_prediction = self.ml_service.predict(mensaje)
+                ml_result = {
+                    'intention': ml_prediction.get('intention', 'DESCONOCIDA'),
+                    'confidence': ml_prediction.get('confidence', 0.0),
+                    'method': 'ml_classification'
+                }
+                print(f"🤖 ML: {ml_result['intention']} (confianza: {ml_result['confidence']:.2f})")
+            
+            transition_result = dynamic_service.determine_next_state(
+                current_state=estado_actual,
+                user_message=mensaje,
+                ml_result=ml_result,
+                context=contexto
+            )
+            
+            print(f"🎯 TRANSICIÓN DINÁMICA: {estado_actual} → {transition_result['next_state']}")
+            print(f"🔧 Método dinámico: {transition_result['detection_method']}")
+            print(f"🎯 Condición detectada: {transition_result['condition_detected']}")
+            
+            contexto_con_retroactiva = self._detectar_seleccion_retroactiva(mensaje, contexto, estado_actual)
+            contexto_con_plan = self._capturar_seleccion_plan(mensaje, transition_result, contexto_con_retroactiva)
+            
+            if transition_result['next_state'] == 'inicial' and estado_actual == 'finalizar_conversacion':
+                print(f"🔄 REINICIANDO CONVERSACIÓN - Limpiando contexto")
+                contexto_actualizado = {
+                    'conversacion_reiniciada': True,
+                    'timestamp_reinicio': datetime.now().isoformat(),
+                    'conversation_previous_client': contexto.get('Nombre_del_cliente', 'Cliente anterior')
+                }
+            else:
+                contexto_actualizado = contexto_con_plan
+            
+            # Respuesta tabla estado_conversacion
+            mensaje_respuesta = self._generar_respuesta_dinamica(
+                transition_result['next_state'], contexto_actualizado
+            )
+            
+            # invocar los botones
+            botones = self._generar_botones_dinamicos(
+                transition_result['next_state'], contexto_actualizado
+            )
+
+            print(f"💾 CONTEXTO PROCESADO:")
+            print(f"   Elementos totales: {len(contexto_actualizado)}")
+            
+            # Verificar si tiene plan
+            if contexto_actualizado.get('plan_capturado'):
+                print(f"   ✅ PLAN DETECTADO: {contexto_actualizado.get('plan_seleccionado')}")
+                print(f"   ✅ MONTO: ${contexto_actualizado.get('monto_acordado', 0):,}")
+            else:
+                print(f"   ⚠️ Sin información de plan en contexto")
+
+            return {
+                'intencion': transition_result['condition_detected'],
+                'confianza': transition_result['confidence'],
+                'next_state': transition_result['next_state'],
+                'contexto_actualizado': contexto_actualizado,
+                'mensaje_respuesta': mensaje_respuesta,
+                'botones': botones,
+                'metodo': 'sistema_dinamico_completo',
+                'usar_resultado': True,
+                'transition_info': transition_result
+            }
+                
+        except Exception as e:
+            print(f"❌ Error en sistema dinámico: {e}")
+            return self._fallback_inteligente(mensaje, contexto, estado_actual)
+    
+    def _detectar_seleccion_retroactiva(self, mensaje: str, contexto: Dict[str, Any], estado_actual: str) -> Dict[str, Any]:
+        """
+        🔍 DETECTAR SELECCIONES RETROACTIVAS 
+        Detecta cuando el usuario selecciona opciones mencionadas anteriormente
+        """
+        try:
+            mensaje_lower = mensaje.lower()
+            contexto_actualizado = contexto.copy()
+            
+            # Detectar selecciones numéricas retroactivas
+            if estado_actual in ['proponer_planes_pago', 'informar_deuda']:
+                
+                # Patron de plan
+                if any(pattern in mensaje_lower for pattern in ['primer', 'primera', '1', 'uno']):
+                    contexto_actualizado['seleccion_retroactiva'] = 'opcion_1'
+                    contexto_actualizado['usuario_selecciono'] = 'primera_opcion'
+                    print("🔍 Detección retroactiva: Primera opción")
+                    
+                elif any(pattern in mensaje_lower for pattern in ['segunda', 'segundo', '2', 'dos']):
+                    contexto_actualizado['seleccion_retroactiva'] = 'opcion_2'
+                    contexto_actualizado['usuario_selecciono'] = 'segunda_opcion'
+                    print("🔍 Detección retroactiva: Segunda opción")
+                    
+                elif any(pattern in mensaje_lower for pattern in ['tercera', 'tercer', '3', 'tres']):
+                    contexto_actualizado['seleccion_retroactiva'] = 'opcion_3'
+                    contexto_actualizado['usuario_selecciono'] = 'tercera_opcion'
+                    print("🔍 Detección retroactiva: Tercera opción")
+                    
+                elif any(pattern in mensaje_lower for pattern in ['cuarta', 'cuarto', '4', 'cuatro']):
+                    contexto_actualizado['seleccion_retroactiva'] = 'opcion_4'
+                    contexto_actualizado['usuario_selecciono'] = 'cuarta_opcion'
+                    print("🔍 Detección retroactiva: Cuarta opción")
+            
+            if 'pago único' in mensaje_lower or 'descuento' in mensaje_lower:
+                contexto_actualizado['seleccion_retroactiva'] = 'pago_unico'
+                print("🔍 Detección retroactiva: Pago único")
+                
+            elif '3 cuotas' in mensaje_lower or 'tres cuotas' in mensaje_lower:
+                contexto_actualizado['seleccion_retroactiva'] = 'plan_3_cuotas'
+                print("🔍 Detección retroactiva: Plan 3 cuotas")
+                
+            elif '6 cuotas' in mensaje_lower or 'seis cuotas' in mensaje_lower:
+                contexto_actualizado['seleccion_retroactiva'] = 'plan_6_cuotas'
+                print("🔍 Detección retroactiva: Plan 6 cuotas")
+                
+            elif '12 cuotas' in mensaje_lower or 'doce cuotas' in mensaje_lower:
+                contexto_actualizado['seleccion_retroactiva'] = 'plan_12_cuotas'
+                print("🔍 Detección retroactiva: Plan 12 cuotas")
+            
+            return contexto_actualizado
+            
+        except Exception as e:
+            print(f"❌ Error en detección retroactiva: {e}")
+            return contexto
+
+    def _crear_plan_retroactivo(self, tipo_plan: str, contexto: Dict) -> Dict[str, Any]:
+        """Crear información de plan retroactivamente"""
         
-        # ✅ 3. PROCESAMIENTO CONTEXTUAL INTELIGENTE
-        resultado_contextual = self._procesar_contexto_inteligente(mensaje, contexto, estado_actual)
-        if resultado_contextual['confianza'] >= 0.7:
-            return resultado_contextual
+        contexto_actualizado = contexto.copy()
+        saldo_total = contexto.get('saldo_total', 0)
+        oferta_2 = contexto.get('oferta_2', 0)
+        cuotas_3 = contexto.get('hasta_3_cuotas', 0)
+        cuotas_6 = contexto.get('hasta_6_cuotas', 0)
         
-        # ✅ 4. OPENAI PARA CASOS COMPLEJOS
-        if self.openai_service:
-            resultado_openai = self._procesar_con_openai(mensaje, contexto, estado_actual)
-            if resultado_openai['usar_resultado']:
-                return resultado_openai
+        if tipo_plan == 'pago_unico':
+            plan_info = {
+                'plan_seleccionado': 'Pago único con descuento',
+                'monto_acordado': oferta_2,
+                'numero_cuotas': 1,
+                'valor_cuota': oferta_2
+            }
+        elif tipo_plan == 'cuotas_3':
+            plan_info = {
+                'plan_seleccionado': 'Plan de 3 cuotas sin interés',
+                'monto_acordado': cuotas_3 * 3,
+                'numero_cuotas': 3,
+                'valor_cuota': cuotas_3
+            }
+        elif tipo_plan == 'cuotas_6':
+            plan_info = {
+                'plan_seleccionado': 'Plan de 6 cuotas sin interés',
+                'monto_acordado': cuotas_6 * 6,
+                'numero_cuotas': 6,
+                'valor_cuota': cuotas_6
+            }
         
-        # ✅ 5. FALLBACK INTELIGENTE
-        return self._fallback_inteligente(mensaje, contexto, estado_actual)
+        from datetime import datetime, timedelta
+        plan_info.update({
+            'fecha_limite': (datetime.now() + timedelta(days=7)).strftime("%d de %B de %Y"),
+            'plan_capturado': True,
+            'captura_retroactiva': True
+        })
+        
+        contexto_actualizado.update(plan_info)
+        print(f"✅ PLAN RETROACTIVO CREADO: {plan_info['plan_seleccionado']}")
+        
+        return contexto_actualizado
+    
+    def _capturar_seleccion_plan(self, mensaje: str, transition_result: Dict, contexto: Dict) -> Dict[str, Any]:
+        """🎯 CAPTURAR SELECCIÓN DE PLAN Y CALCULAR VARIABLES - VERSIÓN CORREGIDA"""
+        
+        condicion = transition_result.get('condition_detected', '')
+        contexto_actualizado = contexto.copy()
+        
+        print(f"🔍 VERIFICANDO CAPTURA DE PLAN:")
+        print(f"   Condición detectada: {condicion}")
+        print(f"   Mensaje: '{mensaje}'")
+        
+        mensaje_lower = mensaje.lower().strip()
+        
+        if condicion and condicion.startswith('cliente_selecciona_'):
+            print(f"🎯 CAPTURANDO POR CONDICIÓN BD: {condicion}")
+            contexto_con_plan = self._procesar_seleccion_por_condicion(condicion, contexto_actualizado, mensaje)
+            if contexto_con_plan.get('plan_capturado'):
+                return contexto_con_plan
+        
+        plan_detectado = self._detectar_plan_directo(mensaje_lower, contexto_actualizado)
+        if plan_detectado:
+            print(f"🎯 PLAN DETECTADO DIRECTAMENTE: {plan_detectado['tipo']}")
+            contexto_actualizado.update(plan_detectado)
+            return contexto_actualizado
+        
+        plan_por_numero = self._detectar_seleccion_numerica(mensaje_lower, contexto_actualizado)
+        if plan_por_numero:
+            print(f"🎯 PLAN DETECTADO POR NÚMERO: {plan_por_numero['tipo']}")
+            contexto_actualizado.update(plan_por_numero)
+            return contexto_actualizado
+        
+        print(f"ℹ️ No se detectó selección de plan válida")
+        return contexto_actualizado
+
+    def _detectar_seleccion_numerica(self, mensaje_lower: str, contexto: Dict) -> Optional[Dict[str, Any]]:
+        """✅ DETECTAR SELECCIÓN POR NÚMEROS O POSICIONES"""
+        
+        saldo_total = contexto.get('saldo_total', 0)
+        oferta_2 = contexto.get('oferta_2', 0)
+        cuotas_3 = contexto.get('hasta_3_cuotas', 0)
+        cuotas_6 = contexto.get('hasta_6_cuotas', 0)
+        cuotas_12 = contexto.get('hasta_12_cuotas', 0)
+        nombre = contexto.get('Nombre_del_cliente', 'Cliente')
+        
+        # Mapeo de selecciones numéricas
+        if any(pattern in mensaje_lower for pattern in ['primera', 'primer', '1', 'uno']):
+            return self._generar_plan_pago_unico(nombre, saldo_total, oferta_2, "primera opción")
+        
+        elif any(pattern in mensaje_lower for pattern in ['segunda', 'segundo', '2', 'dos']):
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_3, 3, "Plan 3 cuotas (segunda opción)")
+        
+        elif any(pattern in mensaje_lower for pattern in ['tercera', 'tercer', '3', 'tres']): 
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_6, 6, "Plan 6 cuotas (tercera opción)")
+        
+        elif any(pattern in mensaje_lower for pattern in ['cuarta', 'cuarto', '4', 'cuatro']):
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_12, 12, "Plan 12 cuotas (cuarta opción)")
+        
+        return None
+
+    def _generar_plan_pago_unico(self, nombre: str, saldo_total: int, oferta_2: int, contexto_seleccion: str) -> Dict[str, Any]:
+        """✅ GENERAR DATOS DEL PLAN PAGO ÚNICO"""
+        
+        if not oferta_2 or oferta_2 <= 0:
+            oferta_2 = int(saldo_total * 0.7) if saldo_total > 0 else 0
+        
+        descuento = saldo_total - oferta_2 if saldo_total > oferta_2 else 0
+        porcentaje_desc = int((descuento / saldo_total) * 100) if saldo_total > 0 else 0
+        
+        fecha_limite = (datetime.now() + timedelta(days=30)).strftime("%d de %B de %Y")
+        
+        return {
+            'plan_capturado': True,
+            'plan_seleccionado': 'Pago único con descuento',
+            'tipo_plan': 'pago_unico',
+            'monto_acordado': oferta_2,
+            'numero_cuotas': 1,
+            'valor_cuota': oferta_2,
+            'descuento_aplicado': descuento,
+            'porcentaje_descuento': porcentaje_desc,
+            'fecha_limite': fecha_limite,
+            'fecha_seleccion': datetime.now().isoformat(),
+            'cliente_acepto_plan': True,
+            'seleccion_original_usuario': contexto_seleccion,
+            'metodo_deteccion': 'pago_unico_directo'
+        }
+
+    def _generar_plan_cuotas(self, nombre: str, saldo_total: int, valor_cuota: int, 
+                            num_cuotas: int, descripcion_plan: str) -> Dict[str, Any]:
+        """✅ GENERAR DATOS DEL PLAN DE CUOTAS"""
+        
+        if not valor_cuota or valor_cuota <= 0:
+            # Calcular cuota basada en descuento progresivo
+            descuento_factor = 1.0 - (num_cuotas / 100)
+            valor_cuota = int((saldo_total * descuento_factor) / num_cuotas) if saldo_total > 0 else 0
+        
+        monto_total = valor_cuota * num_cuotas
+        descuento = saldo_total - monto_total if saldo_total > monto_total else 0
+        porcentaje_desc = int((descuento / saldo_total) * 100) if saldo_total > 0 else 0
+        
+        fecha_limite = (datetime.now() + timedelta(days=30)).strftime("%d de %B de %Y")
+        
+        return {
+            'plan_capturado': True,
+            'plan_seleccionado': descripcion_plan,
+            'tipo_plan': f'cuotas_{num_cuotas}',
+            'monto_acordado': monto_total,
+            'numero_cuotas': num_cuotas,
+            'valor_cuota': valor_cuota,
+            'descuento_aplicado': descuento,
+            'porcentaje_descuento': porcentaje_desc,
+            'fecha_limite': fecha_limite,
+            'fecha_seleccion': datetime.now().isoformat(),
+            'cliente_acepto_plan': True,
+            'seleccion_original_usuario': f"Plan {num_cuotas} cuotas",
+            'metodo_deteccion': f'cuotas_{num_cuotas}_directo'
+        }
+
+    def _procesar_seleccion_por_condicion(self, condicion: str, contexto: Dict, mensaje: str) -> Dict[str, Any]:
+        """✅ PROCESAR SELECCIÓN BASADA EN CONDICIÓN BD"""
+        
+        nombre = contexto.get('Nombre_del_cliente', 'Cliente')
+        saldo_total = contexto.get('saldo_total', 0)
+        
+        if condicion == 'cliente_selecciona_pago_unico':
+            oferta_2 = contexto.get('oferta_2', 0)
+            return self._generar_plan_pago_unico(nombre, saldo_total, oferta_2, mensaje)
+        
+        elif condicion == 'cliente_selecciona_plan_3_cuotas':
+            cuotas_3 = contexto.get('hasta_3_cuotas', 0)
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_3, 3, "Plan 3 cuotas sin interés")
+        
+        elif condicion == 'cliente_selecciona_plan_6_cuotas':
+            cuotas_6 = contexto.get('hasta_6_cuotas', 0)
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_6, 6, "Plan 6 cuotas sin interés")
+        
+        elif condicion == 'cliente_selecciona_plan_12_cuotas':
+            cuotas_12 = contexto.get('hasta_12_cuotas', 0)
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_12, 12, "Plan 12 cuotas sin interés")
+        
+        # Condiciones genéricas
+        elif condicion in ['cliente_selecciona_plan', 'cliente_confirma_plan_elegido']:
+            plan_detectado = self._detectar_plan_directo(mensaje.lower(), contexto)
+            if plan_detectado:
+                return plan_detectado
+            
+            # Fallback
+            oferta_2 = contexto.get('oferta_2', 0)
+            return self._generar_plan_pago_unico(nombre, saldo_total, oferta_2, mensaje)
+        
+        return contexto 
+    def _detectar_plan_directo(self, mensaje_lower: str, contexto: Dict) -> Optional[Dict[str, Any]]:
+        """✅ NUEVO: Detectar plan directamente por palabras clave"""
+        
+        nombre = contexto.get('Nombre_del_cliente', 'Cliente')
+        saldo_total = contexto.get('saldo_total', 0)
+        oferta_1 = contexto.get('oferta_1', 0)
+        oferta_2 = contexto.get('oferta_2', 0)
+        cuotas_3 = contexto.get('hasta_3_cuotas', 0)
+        cuotas_6 = contexto.get('hasta_6_cuotas', 0)
+        cuotas_12 = contexto.get('hasta_12_cuotas', 0)
+        
+        if any(keyword in mensaje_lower for keyword in [
+            'pago unico', 'pago único', 'descuento', 'liquidar todo', 
+            'pago completo', 'oferta especial'
+        ]):
+            return self._generar_plan_pago_unico(nombre, saldo_total, oferta_2, mensaje_lower)
+        
+        elif any(keyword in mensaje_lower for keyword in [
+            '3 cuotas', 'tres cuotas', 'plan 3', 'plan de 3'
+        ]):
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_3, 3, "3 cuotas sin interés")
+        
+        elif any(keyword in mensaje_lower for keyword in [
+            '6 cuotas', 'seis cuotas', 'plan 6', 'plan de 6'
+        ]):
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_6, 6, "6 cuotas sin interés")
+        
+        elif any(keyword in mensaje_lower for keyword in [
+            '12 cuotas', 'doce cuotas', 'plan 12', 'plan de 12'
+        ]):
+            return self._generar_plan_cuotas(nombre, saldo_total, cuotas_12, 12, "12 cuotas sin interés")
+        
+        return None
+
+    def _generar_respuesta_dinamica(self, estado: str, contexto: Dict[str, Any]) -> str:
+        """✅ GENERAR RESPUESTA DESDE TABLA Estados_Conversacion"""
+        try:
+            query = text("""
+                SELECT mensaje_template 
+                FROM Estados_Conversacion 
+                WHERE nombre = :estado AND activo = 1
+            """)
+            
+            result = self.db.execute(query, {"estado": estado}).fetchone()
+            
+            if result and result[0]:
+                template = result[0]
+                print(f"✅ Template dinámico obtenido para estado '{estado}'")
+                
+                try:
+                    from app.services.variable_service import crear_variable_service
+                    variable_service = crear_variable_service(self.db)
+                    mensaje_final = variable_service.resolver_variables(template, contexto)
+                    print(f"✅ Variables resueltas dinámicamente")
+                    return mensaje_final
+                except Exception as e:
+                    print(f"⚠️ Error resolviendo variables: {e}")
+                    return template
+            else:
+                print(f"⚠️ No se encontró template para estado '{estado}', usando fallback")
+                # Fallback
+                nombre = contexto.get('Nombre_del_cliente', 'Cliente')
+                return f"Gracias {nombre}, procesando tu solicitud en estado {estado}."
+                
+        except Exception as e:
+            print(f"❌ Error generando respuesta dinámica: {e}")
+            nombre = contexto.get('Nombre_del_cliente', 'Cliente')
+            return f"¿En qué más puedo ayudarte, {nombre}?"
+
+    def _generar_botones_dinamicos(self, estado: str, contexto: Dict[str, Any]) -> List[Dict[str, str]]:
+        """✅ GENERAR BOTONES DINÁMICOS DESDE BD"""
+        try:
+            
+            if estado == "proponer_planes_pago":
+                return [
+                    {"id": "pago_unico", "text": "Pago único con descuento"},
+                    {"id": "plan_3_cuotas", "text": "Plan 3 cuotas"},
+                    {"id": "plan_6_cuotas", "text": "Plan 6 cuotas"},
+                    {"id": "plan_12_cuotas", "text": "Plan 12 cuotas"}
+                ]
+            elif estado == "generar_acuerdo":
+                return [
+                    {"id": "confirmar_acuerdo", "text": "Confirmar acuerdo"},
+                    {"id": "modificar_terminos", "text": "Modificar términos"}
+                ]
+            elif estado == "finalizar_conversacion":
+                return [
+                    {"id": "nueva_consulta", "text": "Nueva consulta"},
+                    {"id": "finalizar", "text": "Finalizar"}
+                ]
+            else:
+                return [
+                    {"id": "continuar", "text": "Continuar"},
+                    {"id": "asesor", "text": "Hablar con asesor"}
+                ]
+                
+        except Exception as e:
+            print(f"❌ Error generando botones dinámicos: {e}")
+            return [{"id": "continuar", "text": "Continuar"}]
     
     def _detectar_cedula_inteligente(self, mensaje: str) -> Optional[str]:
         """Detección robusta de cédulas con múltiples patrones"""
         patrones_cedula = [
-            r'\b(\d{7,12})\b',                    # Números directos
-            r'cédula\s*:?\s*(\d{7,12})',         # "cédula: 12345"
-            r'cedula\s*:?\s*(\d{7,12})',         # sin tilde
-            r'documento\s*:?\s*(\d{7,12})',      # "documento 12345"
-            r'cc\s*:?\s*(\d{7,12})',             # "cc: 12345"
-            r'es\s+(\d{7,12})',                  # "es 12345"
-            r'tengo\s+(\d{7,12})',               # "tengo 12345"
-            r'mi\s+(\d{7,12})',                  # "mi 12345"
+            r'\b(\d{7,12})\b',                   
+            r'cédula\s*:?\s*(\d{7,12})',         
+            r'cedula\s*:?\s*(\d{7,12})',         
+            r'documento\s*:?\s*(\d{7,12})',      
+            r'cc\s*:?\s*(\d{7,12})',             
+            r'es\s+(\d{7,12})',                  
+            r'tengo\s+(\d{7,12})',               
+            r'mi\s+(\d{7,12})',                 
         ]
         
         for patron in patrones_cedula:
@@ -131,11 +516,9 @@ class SmartLanguageProcessor:
         if not cedula or len(cedula) < 7 or len(cedula) > 12:
             return False
         
-        # No puede ser todos números iguales
         if len(set(cedula)) <= 1:
             return False
         
-        # Debe ser solo números
         if not cedula.isdigit():
             return False
         
@@ -149,7 +532,6 @@ class SmartLanguageProcessor:
         cliente_data = self._consultar_cliente_avanzado(cedula)
         
         if cliente_data['encontrado']:
-            # Cliente encontrado - Crear contexto completo
             contexto_actualizado = {**contexto, **cliente_data['datos']}
             
             return {
@@ -203,7 +585,6 @@ class SmartLanguageProcessor:
             result = self.db.execute(query, {"cedula": str(cedula)}).fetchone()
             
             if result:
-                # Extraer datos y convertir a enteros (sin decimales)
                 datos_base = {
                     'cliente_encontrado': True,
                     'cedula_detectada': cedula,
@@ -216,19 +597,16 @@ class SmartLanguageProcessor:
                     'capital': int(float(result[11])) if result[11] else 0,
                     'intereses': int(float(result[12])) if result[12] else 0
                 }
-                
-                # ✅ USAR OFERTAS DE BD SI EXISTEN, SINO CALCULAR
                 if result[3] and float(result[3]) > 0:
                     datos_base['oferta_1'] = int(float(result[3]))
                 else:
-                    datos_base['oferta_1'] = int(datos_base['saldo_total'] * 0.6)  # 40% desc
+                    datos_base['oferta_1'] = int(datos_base['saldo_total'] * 0.6)  
                 
                 if result[4] and float(result[4]) > 0:
                     datos_base['oferta_2'] = int(float(result[4]))
                 else:
-                    datos_base['oferta_2'] = int(datos_base['saldo_total'] * 0.7)  # 30% desc
+                    datos_base['oferta_2'] = int(datos_base['saldo_total'] * 0.7) 
                 
-                # ✅ CUOTAS DE BD SI EXISTEN, SINO CALCULAR
                 if result[5] and float(result[5]) > 0:
                     datos_base['hasta_3_cuotas'] = int(float(result[5]))
                 else:
@@ -244,7 +622,6 @@ class SmartLanguageProcessor:
                 else:
                     datos_base['hasta_12_cuotas'] = int(datos_base['saldo_total'] / 12)
                 
-                # ✅ CALCULAR DATOS ADICIONALES DINÁMICOS
                 datos_base.update({
                     'ahorro_oferta_1': datos_base['saldo_total'] - datos_base['oferta_1'],
                     'ahorro_oferta_2': datos_base['saldo_total'] - datos_base['oferta_2'],
@@ -276,7 +653,6 @@ class SmartLanguageProcessor:
             
             print(f"🤖 ML: {intencion} (confianza: {confianza:.2f})")
             
-            # ✅ VALIDAR CONFIANZA Y CONTEXTO
             usar_ml = self._validar_resultado_ml(intencion, confianza, contexto, estado)
             
             if usar_ml:
@@ -307,16 +683,13 @@ class SmartLanguageProcessor:
         # 2. Validaciones contextuales
         tiene_cliente = contexto.get('cliente_encontrado', False)
         
-        # Si no hay cliente y la intención requiere cliente, rechazar
         if not tiene_cliente and intencion in ['INTENCION_PAGO', 'SOLICITUD_PLAN', 'CONFIRMACION']:
             if estado in ['inicial', 'validar_documento']:
                 return False
         
-        # Si hay cliente y está pidiendo identificación, puede ser confusión
         if tiene_cliente and intencion == 'IDENTIFICACION' and estado != 'inicial':
             return False
         
-        # 3. Coherencia con estado actual
         coherencia_estado = {
             'inicial': ['SALUDO', 'IDENTIFICACION', 'CONSULTA_DEUDA'],
             'validar_documento': ['IDENTIFICACION', 'CONSULTA_DEUDA'],
@@ -327,7 +700,7 @@ class SmartLanguageProcessor:
         
         intenciones_validas = coherencia_estado.get(estado, [])
         if intenciones_validas and intencion not in intenciones_validas:
-            if confianza < 0.8:  # Solo rechazar si confianza no es muy alta
+            if confianza < 0.8: 
                 return False
         
         return True
@@ -340,9 +713,6 @@ class SmartLanguageProcessor:
         
         print(f"🧠 Análisis contextual: cliente={tiene_cliente}, estado={estado}")
         
-        # ✅ ANÁLISIS DINÁMICO DE INTENCIÓN
-        
-        # Patrones de confirmación
         confirmacion_patterns = ['si', 'sí', 'acepto', 'ok', 'está bien', 'de acuerdo', 'confirmo', 'dale', 'bueno']
         if any(pattern in mensaje_lower for pattern in confirmacion_patterns):
             if tiene_cliente and estado in ['informar_deuda', 'proponer_planes_pago']:
@@ -356,7 +726,6 @@ class SmartLanguageProcessor:
                     'metodo': 'contexto_confirmacion'
                 }
         
-        # Patrones de rechazo
         rechazo_patterns = ['no', 'nop', 'negativo', 'imposible', 'no puedo', 'no me interesa']
         if any(pattern in mensaje_lower for pattern in rechazo_patterns):
             return {
@@ -369,7 +738,6 @@ class SmartLanguageProcessor:
                 'metodo': 'contexto_rechazo'
             }
         
-        # Solicitud de opciones/información
         info_patterns = ['opciones', 'información', 'cuanto', 'cómo', 'qué', 'planes', 'cuotas']
         if any(pattern in mensaje_lower for pattern in info_patterns):
             if tiene_cliente:
@@ -383,7 +751,7 @@ class SmartLanguageProcessor:
                     'metodo': 'contexto_solicitud_info'
                 }
         
-        # Saludos cuando ya hay contexto
+        # Saludos diversos
         saludo_patterns = ['hola', 'buenas', 'buenos días', 'buenas tardes', 'hi']
         if any(pattern in mensaje_lower for pattern in saludo_patterns):
             if tiene_cliente:
@@ -391,7 +759,7 @@ class SmartLanguageProcessor:
                 return {
                     'intencion': 'SALUDO_CONTEXTUAL',
                     'confianza': 0.9,
-                    'next_state': estado,  # Mantener estado actual
+                    'next_state': estado,  
                     'contexto_actualizado': contexto,
                     'mensaje_respuesta': f"Hola de nuevo, {nombre}. ¿En qué más puedo ayudarte con tu cuenta?",
                     'botones': self._generar_botones_saludo_contextual(contexto, estado),
@@ -432,7 +800,6 @@ class SmartLanguageProcessor:
         tiene_cliente = contexto.get('cliente_encontrado', False)
         nombre = contexto.get('Nombre_del_cliente', 'Cliente')
         
-        # Respuesta contextual inteligente
         if tiene_cliente:
             if estado == 'informar_deuda':
                 mensaje_respuesta = f"{nombre}, te recuerdo que tienes opciones de pago disponibles. ¿Te gustaría conocerlas?"
@@ -472,10 +839,7 @@ class SmartLanguageProcessor:
             'metodo': 'fallback_contextual',
             'usar_resultado': True
         }
-    
-    # ==========================================
-    # MÉTODOS DE MAPEO Y GENERACIÓN DINÁMICOS
-    # ==========================================
+
     
     def _mapear_intencion_a_estado(self, intencion: str, estado_actual: str, contexto: Dict) -> str:
         """Mapeo dinámico de intención a próximo estado"""
@@ -553,10 +917,6 @@ class SmartLanguageProcessor:
         """Generar mensaje para manejar objeciones"""
         nombre = contexto.get('Nombre_del_cliente', 'Cliente')
         return f"Entiendo tu situación, {nombre}. Estoy aquí para encontrar una solución que funcione para ti. ¿Qué te preocupa específicamente? Podemos explorar alternativas flexibles."
-    
-    # ==========================================
-    # GENERADORES DE BOTONES DINÁMICOS
-    # ==========================================
     
     def _generar_botones_cliente_encontrado(self, datos_cliente: Dict) -> List[Dict[str, str]]:
         """Botones para cuando se encuentra cliente"""
@@ -696,7 +1056,7 @@ class SmartLanguageProcessor:
     
     def _determinar_estado_openai(self, resultado_openai: Dict, estado_actual: str, contexto: Dict) -> str:
         """Determinar próximo estado basado en resultado OpenAI"""
-        # Análisis simple del mensaje de OpenAI para determinar intención
+
         mensaje = resultado_openai.get('message', '').lower()
         tiene_cliente = contexto.get('cliente_encontrado', False)
         
@@ -707,12 +1067,7 @@ class SmartLanguageProcessor:
         elif 'supervisor' in mensaje or 'asesor' in mensaje:
             return 'escalamiento'
         
-        return estado_actual  # Mantener estado actual por defecto
-
-
-# ==========================================
-# 🚀 ENDPOINT PRINCIPAL CORREGIDO DEFINITIVO
-# ==========================================
+        return estado_actual 
 
 @router.post("/message", response_model=ChatResponse, status_code=status.HTTP_200_OK)
 async def process_chat_message_INTELIGENTE_DEFINITIVO(
@@ -721,7 +1076,7 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
     db: Session = Depends(get_db),
 ):
     """
-    🎯 ENDPOINT PRINCIPAL - VERSIÓN DEFINITIVA INTELIGENTE
+    🎯 ENDPOINT PRINCIPAL - VERSIÓN DEFINITIVA INTELIGENTE CORREGIDA
     - Sin código quemado - Todo dinámico
     - ML como motor principal
     - Detección automática de cédulas
@@ -736,10 +1091,8 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
     print(f"🚀 PROCESAMIENTO INTELIGENTE: '{message_content}' (usuario {user_id})")
     
     try:
-        # 1. OBTENER/CREAR CONVERSACIÓN
         conversation = _get_or_create_conversation(db, user_id, request.conversation_id)
         
-        # 2. RECUPERAR CONTEXTO ACTUAL
         contexto_actual = _recuperar_contexto_seguro(db, conversation)
         
         print(f"💬 Conversación {conversation.id} - Estado: {conversation.current_state}")
@@ -747,10 +1100,8 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         if contexto_actual.get('cliente_encontrado'):
             print(f"👤 Cliente: {contexto_actual.get('Nombre_del_cliente', 'N/A')}")
         
-        # 3. INICIALIZAR PROCESADOR INTELIGENTE
         smart_processor = SmartLanguageProcessor(db)
         
-        # 4. PROCESAR MENSAJE INTELIGENTEMENTE
         resultado = smart_processor.procesar_mensaje_inteligente(
             message_content, 
             contexto_actual, 
@@ -761,16 +1112,26 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         print(f"🔧 Método: {resultado['metodo']}")
         print(f"📍 Estado: {conversation.current_state} → {resultado['next_state']}")
         
-        # 5. VALIDAR ESTADO Y ACTUALIZAR CONVERSACIÓN
         nuevo_estado = _validar_estado_existente(resultado['next_state'])
         contexto_actualizado = resultado['contexto_actualizado']
         
         conversation.current_state = nuevo_estado
         conversation.context_data = json.dumps(contexto_actualizado, ensure_ascii=False, default=str)
         conversation.updated_at = datetime.now()
-        db.commit()
         
-        # 6. LOG DE LA INTERACCIÓN COMPLETA
+        print(f"💾 PERSISTIENDO CONTEXTO:")
+        print(f"   Elementos totales: {len(contexto_actualizado)}")
+        
+        if contexto_actualizado.get('plan_capturado'):
+            print(f"   ✅ PLAN DETECTADO: {contexto_actualizado.get('plan_seleccionado')}")
+            print(f"   ✅ MONTO: ${contexto_actualizado.get('monto_acordado', 0):,}")
+        else:
+            print(f"   ⚠️ Sin información de plan en contexto")
+        
+        print(f"💾 GUARDANDO EN BD...")
+        db.commit()
+        print(f"✅ CONTEXTO GUARDADO EN TABLA CONVERSATIONS")
+    
         _log_interaccion_completa(db, conversation, message_content, resultado, request.button_selected)
         
         print(f"✅ Respuesta generada exitosamente")
@@ -789,7 +1150,6 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         import traceback
         traceback.print_exc()
         
-        # RESPUESTA DE EMERGENCIA
         conversation_id = conversation.id if 'conversation' in locals() else 1
         
         return ChatResponse(
@@ -804,14 +1164,9 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         )
 
 
-# ==========================================
-# 🔧 FUNCIONES DE SOPORTE MEJORADAS
-# ==========================================
-
 def _recuperar_contexto_seguro(db: Session, conversation: Conversation) -> Dict[str, Any]:
     """Recuperar contexto de forma completamente segura"""
     try:
-        # Método 1: Desde objeto conversation
         if hasattr(conversation, 'context_data') and conversation.context_data:
             if isinstance(conversation.context_data, str):
                 context = json.loads(conversation.context_data)
@@ -820,7 +1175,6 @@ def _recuperar_contexto_seguro(db: Session, conversation: Conversation) -> Dict[
             elif isinstance(conversation.context_data, dict):
                 return conversation.context_data
         
-        # Método 2: Consulta directa a BD
         query = text("SELECT context_data FROM conversations WHERE id = :conv_id")
         result = db.execute(query, {"conv_id": conversation.id}).fetchone()
         
@@ -839,7 +1193,6 @@ def _recuperar_contexto_seguro(db: Session, conversation: Conversation) -> Dict[
 def _validar_estado_existente(estado: str) -> str:
     """Validar que el estado existe en BD o mapear a uno válido"""
     
-    # Estados conocidos que existen
     estados_validos = [
         'inicial', 'validar_documento', 'informar_deuda', 
         'proponer_planes_pago', 'generar_acuerdo', 
@@ -850,7 +1203,6 @@ def _validar_estado_existente(estado: str) -> str:
     if estado in estados_validos:
         return estado
     
-    # Mapeos para compatibilidad
     mapeo_estados = {
         'seleccionar_plan': 'proponer_planes_pago',
         'confirmar_plan_elegido': 'generar_acuerdo',
@@ -873,7 +1225,6 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
                              resultado: Dict[str, Any], button_selected: Optional[str]):
     """Log completo y estructurado de la interacción"""
     try:
-        # Log mensaje usuario
         LogService.log_message(
             db=db,
             conversation_id=conversation.id,
@@ -883,7 +1234,6 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
             previous_state=conversation.current_state
         )
         
-        # Metadata estructurada
         metadata = {
             "intencion_detectada": resultado.get('intencion'),
             "metodo_procesamiento": resultado.get('metodo'),
@@ -895,7 +1245,6 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
             "timestamp": datetime.now().isoformat()
         }
         
-        # Log respuesta sistema
         LogService.log_message(
             db=db,
             conversation_id=conversation.id,
@@ -911,7 +1260,6 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
 
 def _get_or_create_conversation(db: Session, user_id: int, conversation_id: Optional[int] = None) -> Conversation:
     """Obtener o crear conversación de forma robusta"""
-    # Crear usuario si no existe
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         user = User(
@@ -926,7 +1274,6 @@ def _get_or_create_conversation(db: Session, user_id: int, conversation_id: Opti
         db.commit()
         print(f"🆕 Usuario {user_id} creado")
     
-    # Buscar conversación existente
     if conversation_id:
         conversation = (
             db.query(Conversation)
@@ -939,13 +1286,7 @@ def _get_or_create_conversation(db: Session, user_id: int, conversation_id: Opti
         if conversation:
             return conversation
     
-    # Crear nueva conversación
     return StateManager.get_or_create_conversation(db, user_id)
-
-
-# ==========================================
-# 🧪 ENDPOINTS DE TESTING Y VALIDACIÓN
-# ==========================================
 
 @router.post("/test-inteligente")
 async def test_sistema_inteligente(db: Session = Depends(get_db)):
@@ -971,7 +1312,6 @@ async def test_sistema_inteligente(db: Session = Depends(get_db)):
     for i, mensaje in enumerate(test_messages):
         resultado = processor.procesar_mensaje_inteligente(mensaje, contexto_test, estado_test)
         
-        # Actualizar contexto para siguiente test
         contexto_test = resultado['contexto_actualizado']
         estado_test = resultado['next_state']
         
@@ -1008,7 +1348,6 @@ async def test_cedula_inteligente(request: CedulaTestRequest, db: Session = Depe
     try:
         processor = SmartLanguageProcessor(db)
         
-        # Test detección en diferentes formatos
         test_messages = [
             request.cedula,
             f"mi cedula es {request.cedula}",
@@ -1023,7 +1362,6 @@ async def test_cedula_inteligente(request: CedulaTestRequest, db: Session = Depe
                 break
         
         if cedula_detectada:
-            # Consultar en BD
             resultado = processor._consultar_cliente_avanzado(cedula_detectada)
             
             if resultado['encontrado']:

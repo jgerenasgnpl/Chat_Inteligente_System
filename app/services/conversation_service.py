@@ -1,11 +1,3 @@
-"""
-CONVERSATION_SERVICE.PY CORREGIDO
-- Elimina dependencias de FlowManager problemático
-- Usa solo ML y lógica simple
-- Sin código hardcodeado
-- Compatible con el nuevo chat.py
-"""
-
 import json
 import re
 import logging
@@ -22,14 +14,12 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# CONFIGURACIÓN SIMPLIFICADA
-# ==========================================
+ 
 CONVERSATION_TIMEOUT_MINUTES = 30
 CACHE_TIMEOUT_SECONDS = 1800
 MAX_CONVERSATIONS_PER_USER = 1
 
-# Cache global simplificado
+ 
 CONTEXT_CACHE = {}
 CACHE_TIMESTAMPS = {}
 CONVERSATION_ACTIVITY = {}
@@ -48,8 +38,9 @@ class ConversationService:
         self.ml_service = self._init_ml_service()
         self.request_count = 0
         self.dynamic_transition_service = create_dynamic_transition_service(db)
+        self._verificar_sistema_dinamico()
+        self._force_dynamic_initialization()
         logger.info("✅ Servicio de transiciones dinámico inicializado")
-        # Limpiar sesiones expiradas
         self._cleanup_expired_sessions()
         logger.info("✅ ConversationService inicializado (versión simplificada)")
     
@@ -128,6 +119,43 @@ class ConversationService:
         except Exception as e:
             logger.error(f"❌ Error procesando mensaje: {e}")
             return self._error_response(conversation_id, user_id)
+
+    def _verificar_sistema_dinamico(self):
+        """🔍 VERIFICAR QUE EL SISTEMA DINÁMICO ESTÉ FUNCIONANDO"""
+        try:
+            stats = self.dynamic_transition_service.get_stats()
+            
+            ml_count = stats['configuration']['ml_mappings_count']
+            keyword_count = stats['configuration']['keyword_patterns_count']
+            fuente = stats['configuration']['configuration_source']
+            
+            print(f"🔍 VERIFICACIÓN SISTEMA DINÁMICO:")
+            print(f"   ML mappings: {ml_count}")
+            print(f"   Keyword patterns: {keyword_count}")
+            print(f"   Fuente: {fuente}")
+            
+            if ml_count > 0 and keyword_count > 0:
+                print(f"✅ SISTEMA DINÁMICO OPERATIVO")
+                
+                # Test rápido
+                test_result = self.dynamic_transition_service.determine_next_state(
+                    current_state="proponer_planes_pago",
+                    user_message="acepto",
+                    ml_result={"intention": "CONFIRMACION_EXITOSA", "confidence": 0.9},
+                    context={"cliente_encontrado": True}
+                )
+                
+                print(f"🧪 Test dinámico: proponer_planes_pago + 'acepto' → {test_result['next_state']}")
+                
+                if test_result['next_state'] == "confirmar_plan_elegido":
+                    print(f"✅ SISTEMA DINÁMICO RESPONDE CORRECTAMENTE")
+                else:
+                    print(f"⚠️ Sistema dinámico no responde como esperado")
+            else:
+                print(f"❌ SISTEMA DINÁMICO SIN DATOS - Usando fallback")
+                
+        except Exception as e:
+            print(f"❌ Error verificando sistema dinámico: {e}")
 
     async def _process_message_simple(self, conversation: Conversation, user_message: str, contexto: Dict) -> Dict:
         """
@@ -469,6 +497,40 @@ class ConversationService:
             return self.dynamic_transition_service.get_stats()
         except Exception as e:
             return {"error": str(e)}
+    def _force_dynamic_initialization(self):
+        """🔧 FORZAR INICIALIZACIÓN DINÁMICA"""
+        try:
+            # Verificar que se cargaron datos dinámicos
+            stats = self.dynamic_transition_service.get_stats()
+            
+            ml_count = stats['configuration']['ml_mappings_count']
+            keyword_count = stats['configuration']['keyword_patterns_count']
+            
+            print(f"🔧 FORZANDO CONEXIÓN DINÁMICA:")
+            print(f"   ML mappings cargados: {ml_count}")
+            print(f"   Keyword patterns cargados: {keyword_count}")
+            
+            if ml_count == 0 or keyword_count == 0:
+                print(f"❌ DATOS DINÁMICOS NO CARGADOS - Reintentando...")
+                # Forzar recarga
+                self.dynamic_transition_service._load_configuration()
+                
+                # Verificar nuevamente
+                stats = self.dynamic_transition_service.get_stats()
+                ml_count = stats['configuration']['ml_mappings_count']
+                keyword_count = stats['configuration']['keyword_patterns_count']
+                
+                print(f"🔄 Después de recarga:")
+                print(f"   ML mappings: {ml_count}")
+                print(f"   Keyword patterns: {keyword_count}")
+            
+            if ml_count > 0 and keyword_count > 0:
+                print(f"✅ SISTEMA DINÁMICO OPERATIVO")
+            else:
+                print(f"❌ SISTEMA USANDO FALLBACK HARDCODEADO")
+                
+        except Exception as e:
+            print(f"❌ Error en inicialización dinámica: {e}")
 
     def trigger_auto_improvement(self):
         """✅ NUEVO - Disparar auto-mejora del sistema"""
@@ -649,9 +711,7 @@ class ConversationService:
         
         return []
     
-    # ==========================================
-    # MÉTODOS DE SOPORTE SIMPLIFICADOS
-    # ==========================================
+ 
     
     def get_or_create_clean_conversation(self, conversation_id: int, user_id: int) -> Conversation:
         """Obtener o crear conversación - versión simplificada"""
@@ -979,9 +1039,7 @@ def crear_conversation_service_with_cache(db: Session) -> ConversationServiceWit
     service = ConversationServiceWithCache(db)
     logger.info("✅ ConversationServiceWithCache creado con sistema dinámico")
     return service
-# ==========================================
-# UTILIDADES DE LIMPIEZA
-# ==========================================
+ 
 
 def limpiar_cache_manual():
     """Limpieza manual del cache"""

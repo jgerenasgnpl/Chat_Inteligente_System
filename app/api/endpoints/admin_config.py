@@ -1,7 +1,3 @@
-"""
-🔧 ENDPOINT ADMINISTRATIVO PARA GESTIÓN DE ESTADOS
-Agregar a admin_config.py para gestionar estados desde el navegador
-"""
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Query
 from sqlalchemy.orm import Session
@@ -25,7 +21,6 @@ router = APIRouter(
 
 @router.get("/estados")
 def listar_estados_completo(db: Session = Depends(get_db)):
-    """Lista todos los estados con información completa"""
     try:
         query = text("""
             SELECT 
@@ -36,7 +31,6 @@ def listar_estados_completo(db: Session = Depends(get_db)):
             FROM Estados_Conversacion 
             ORDER BY nombre
         """)
-        
         estados = []
         for row in db.execute(query):
             estados.append({
@@ -53,13 +47,11 @@ def listar_estados_completo(db: Session = Depends(get_db)):
                 "fecha_creacion": row[10].isoformat() if row[10] else None,
                 "fecha_actualizacion": row[11].isoformat() if row[11] else None
             })
-        
         return {
             "estados": estados,
             "total": len(estados),
             "activos": len([e for e in estados if e["activo"]])
         }
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error obteniendo estados: {e}")
 
@@ -70,17 +62,14 @@ async def test_bridge_endpoint(
         intencion: str = Form(...),
         db: Session = Depends(get_db)
     ):
-        """Test del bridge en runtime"""
         try:
             bridge = StateConditionBridge(db)
-            
             resultado = bridge.determinar_siguiente_estado(
                 estado_actual=estado_actual,
                 mensaje=mensaje,
                 intencion_ml=intencion,
                 contexto={"cliente_encontrado": True}
             )
-            
             return {
                 "test_input": {
                     "estado_actual": estado_actual,
@@ -90,7 +79,6 @@ async def test_bridge_endpoint(
                 "resultado": resultado,
                 "success": True
             }
-            
         except Exception as e:
             return {
                 "error": str(e),
@@ -111,18 +99,13 @@ def crear_estado_completo(
     db: Session = Depends(get_db),
     admin: str = Depends(get_current_active_admin)
 ):
-    """Crea un nuevo estado de conversación"""
     try:
-        # Verificar que no exista
         check_query = text("""
             SELECT COUNT(*) FROM Estados_Conversacion WHERE nombre = :nombre
         """)
         existe = db.execute(check_query, {"nombre": nombre}).scalar()
-        
         if existe > 0:
             raise HTTPException(status_code=400, detail=f"Estado '{nombre}' ya existe")
-        
-        # Crear estado
         insert_query = text("""
             INSERT INTO Estados_Conversacion (
                 nombre, mensaje_template, accion, condicion,
@@ -135,7 +118,6 @@ def crear_estado_completo(
                 :timeout, :activo, GETDATE(), GETDATE()
             )
         """)
-        
         db.execute(insert_query, {
             "nombre": nombre,
             "mensaje": mensaje_template,
@@ -147,9 +129,7 @@ def crear_estado_completo(
             "timeout": timeout_segundos,
             "activo": activo
         })
-        
         db.commit()
-        
         return {
             "message": f"Estado '{nombre}' creado exitosamente",
             "estado": {
@@ -158,7 +138,6 @@ def crear_estado_completo(
                 "estado_siguiente_default": estado_siguiente_default
             }
         }
-        
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error creando estado: {e}")
@@ -634,15 +613,9 @@ def cleanup_expired_cache():
     return {"cleaned_keys": cleaned, "message": f"{cleaned} claves expiradas limpiadas"}
 
 
-# app/core/config.py - AGREGAR CONFIGURACIÓN REDIS
-"""
-AGREGAR A CONFIGURACIÓN EXISTENTE
-"""
+
 
 class Settings(BaseSettings):
-    # ... configuración existente ...
-    
-    # ===== REDIS CONFIGURATION =====
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: Optional[str] = None
@@ -650,13 +623,11 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = True
     REDIS_DEFAULT_TTL: int = 3600
     REDIS_COMPRESSION_THRESHOLD: int = 1000
-    
-    # Cache TTL específicos
-    CACHE_CLIENT_TTL: int = 7200      # 2 horas
-    CACHE_ML_TTL: int = 1800          # 30 minutos  
-    CACHE_OPENAI_TTL: int = 3600      # 1 hora
-    CACHE_VARIABLES_TTL: int = 1800   # 30 minutos
-    CACHE_CONTEXT_TTL: int = 3600     # 1 hora
+    CACHE_CLIENT_TTL: int = 7200
+    CACHE_ML_TTL: int = 1800
+    CACHE_OPENAI_TTL: int = 3600
+    CACHE_VARIABLES_TTL: int = 1800
+    CACHE_CONTEXT_TTL: int = 3600
 
 @router.get("/api/v1/admin/dynamic-system/stats")
 async def get_dynamic_system_stats(db: Session = Depends(get_db)):

@@ -1,11 +1,4 @@
-"""
-FLOW_MANAGER.PY COMPLETAMENTE CORREGIDO
-- Elimina código hardcodeado problemático
-- Sin dependencias de tablas que no existen
-- Compatible con el nuevo chat.py
-- Funciona solo como fallback si es necesario
-"""
-
+from typing import List
 import json
 import re
 import logging

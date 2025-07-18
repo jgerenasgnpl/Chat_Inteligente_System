@@ -5,17 +5,14 @@ from datetime import datetime
 
 class Conversation(Base):
     __tablename__ = "conversations"
-    
-    # ✅ SOLO COLUMNAS QUE EXISTEN EN BD
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     current_state = Column(String(100), default="inicial")
-    context_data = Column(Text, nullable=True)  # ✅ ESTA SÍ EXISTE
+    context_data = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)
- 
     user = relationship("User", back_populates="conversations", lazy="select")
     messages = relationship(
         "Message", 
@@ -23,6 +20,5 @@ class Conversation(Base):
         lazy="select",
         cascade="all, delete-orphan"
     )
-    
     def __repr__(self):
         return f"<Conversation(id={self.id}, user_id={self.user_id}, state='{self.current_state}')>"

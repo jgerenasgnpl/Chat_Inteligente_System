@@ -1,29 +1,22 @@
+
 from typing import Generator
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import OAuth2PasswordBearer, SecurityScopes
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.db.session import SessionLocal
-
-from app import models, schemas 
-
-# 1. Define de dónde sale el token
+from app import models, schemas
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/token",
     scopes={"read": "Leer datos", "write": "Escribir datos"}
 )
-
-# 2. Sesión de BD
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
-# 3. Verificar y decodificar JWT
 def _decode_token(token: str, credentials_exception):
     try:
         payload = jwt.decode(
@@ -38,8 +31,6 @@ def _decode_token(token: str, credentials_exception):
     except JWTError:
         raise credentials_exception
     return token_data
-
-# 4. Obtener usuario actual
 def get_current_user(
     security_scopes: SecurityScopes,
     token: str = Depends(oauth2_scheme),
@@ -51,8 +42,6 @@ def get_current_user(
         headers={"WWW-Authenticate": f'Bearer scope="{security_scopes.scope_str}"'},
     )
     token_data = _decode_token(token, credentials_exception)
-
-    # Comprueba scopes si los declaraste en el endpoint
     for scope in security_scopes.scopes:
         if scope not in token_data.scopes:
             raise HTTPException(
@@ -60,15 +49,12 @@ def get_current_user(
                 detail="No tiene permisos suficientes",
                 headers={"WWW-Authenticate": f'Bearer scope="{security_scopes.scope_str}"'},
             )
-
 def get_current_active_user(
     current_user: models.user = Security(get_current_user, scopes=["read"])
 ) -> models.user:
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Usuario inactivo")
     return current_user
-
-# 5. Dependencia de admin (opcional)
 def get_current_active_admin(
     current_user: models.user = Security(get_current_user, scopes=["write"])
 ) -> models.user:
