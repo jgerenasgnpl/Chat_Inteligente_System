@@ -29,13 +29,48 @@ class Settings(BaseSettings):
     ML_AUTO_IMPROVE: bool = True
     
     # ===== OPENAI CONFIGURATION =====
-    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: str = "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"
+    ENABLE_OPENAI: bool = True
     OPENAI_MODEL: str = "gpt-3.5-turbo"
     OPENAI_MAX_TOKENS: int = 400
     OPENAI_TEMPERATURE: float = 0.7
+    OPENAI_CONFIDENCE_THRESHOLD: float = 0.8
+    OPENAI_ONLY_FOR_COMPLEX: bool = True  
+
+    # ====== SISTEMA REGLAS (Críticas y Fallback) ======
+    RULES_ENABLED: bool = True
+    RULES_PRIORITY_MODE: bool = True  
     
     # ===== LOGGING =====
     LOG_LEVEL: str = "INFO"
+
+    # ===== JERARQUÍA Y PERFORMANCE =====
+
+    TIMEOUT_RULES: int = 10      
+    TIMEOUT_ML: int = 100 
+    TIMEOUT_OPENAI: int = 5000 
+    
+    # Umbrales de confianza
+    CONFIDENCE_CRITICAL: float = 1.0 
+    CONFIDENCE_HIGH: float = 0.8  
+    CONFIDENCE_MEDIUM: float = 0.6  
+    CONFIDENCE_LOW: float = 0.4     
+    
+    # Control de escalamiento
+    USE_OPENAI_WHEN_ML_FAILS: bool = True
+    USE_RULES_WHEN_ALL_FAIL: bool = True
+    MAX_RETRIES_PER_SYSTEM: int = 1
+    
+    # ===== LOGGING Y DEBUGGING =====
+    LOG_LEVEL: str = "INFO"
+    LOG_PERFORMANCE_METRICS: bool = True
+    LOG_CACHE_STATISTICS: bool = True
+    LOG_SYSTEM_DECISIONS: bool = True
+    DEBUG_MODE: bool = False
+    
+    ML_ENABLE_HYBRID_DETECTION: bool = True
+    ML_SAVE_INTERACTIONS: bool = True
+    ML_AUTO_IMPROVE: bool = True
     
     # ===== CARACTERÍSTICAS DEL SISTEMA =====
     COMPANY_NAME: str = "Systemgroup"
@@ -58,6 +93,7 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # ===== VALIDACIONES Y CONFIGURACIONES ADICIONALES =====
+
 def validate_settings():
     """Validar configuraciones críticas"""
     

@@ -1,0 +1,727 @@
+# ==========================================
+# FLOW MANAGER OPTIMIZADO - JERARQUÍA INTELIGENTE
+# ==========================================
+
+import json
+import re
+import logging
+import time
+from typing import Dict, Any, Optional, Tuple
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from datetime import datetime, timedelta
+import hashlib
+
+logger = logging.getLogger(__name__)
+
+class OptimizedFlowManager:
+    """
+    Flow Manager con arquitectura jerárquica:
+    1. REGLAS CRÍTICAS (cédulas, comandos) - 0ms
+    2. ML PRINCIPAL (intenciones) - 50ms
+    3. OPENAI REFINAMIENTO (casos complejos) - 500ms
+    4. CACHE UNIFICADO - Evita recálculos
+    """
+    
+    def __init__(self, db: Session):
+        self.db = db
+        
+        # Sistemas especializados
+        self.ml_model = None
+        self.openai_service = None
+        
+        # Cache unificado con TTL
+        self.cache = {}
+        self.cache_ttl = {}
+        self.cache_max_size = 1000
+        
+        # Configuración desde BD
+        self.config = {}
+        self.estados_cache = {}
+        
+        # Métricas de rendimiento
+        self.metrics = {
+            'rule_hits': 0,
+            'ml_hits': 0, 
+            'openai_hits': 0,
+            'cache_hits': 0,
+            'total_requests': 0
+        }
+        
+        self._initialize_systems()
+        logger.info("✅ OptimizedFlowManager inicializado")
+    
+    def _initialize_systems(self):
+        """Inicializar sistemas en orden de prioridad"""
+        
+        # 1. Cargar configuración de BD
+        self._load_config_from_db()
+        
+        # 2. Cargar modelo ML (prioridad alta)
+        self._load_ml_model()
+        
+        # 3. Configurar OpenAI (prioridad baja)
+        self._setup_openai()
+        
+        # 4. Limpiar cache viejo
+        self._cleanup_cache()
+    
+    def _load_config_from_db(self):
+        """Cargar configuración una sola vez"""
+        try:
+            # Estados
+            query = text("""
+                SELECT nombre, mensaje_template, estado_siguiente_default
+                FROM Estados_Conversacion WHERE activo = 1
+            """)
+            for row in self.db.execute(query):
+                self.estados_cache[row[0]] = {
+                    'mensaje': row[1],
+                    'siguiente': row[2]
+                }
+            
+            # Configuración global
+            query = text("""
+                SELECT nombre_parametro, valor 
+                FROM Configuracion_Global WHERE activo = 1
+            """)
+            for row in self.db.execute(query):
+                self.config[row[0]] = row[1]
+            
+            logger.info(f"✅ Configuración cargada: {len(self.estados_cache)} estados")
+            
+        except Exception as e:
+            logger.error(f"❌ Error cargando configuración: {e}")
+            self._load_default_config()
+    
+    def _load_default_config(self):
+        """Configuración por defecto si falla BD"""
+        self.config = {
+            'ml_enabled': 'true',
+            'openai_enabled': 'true',
+            'confidence_threshold_ml': '0.7',
+            'cache_enabled': 'true'
+        }
+        
+        self.estados_cache = {
+            'inicial': {'mensaje': '¡Hola! Necesito tu cédula para ayudarte.', 'siguiente': 'validar_documento'},
+            'validar_documento': {'mensaje': 'Por favor proporciona tu documento.', 'siguiente': 'informar_deuda'},
+            'informar_deuda': {'mensaje': 'Tu saldo es {{saldo_total}}. ¿Quieres opciones de pago?', 'siguiente': 'proponer_planes_pago'},
+            'proponer_planes_pago': {'mensaje': 'Opciones: 1️⃣ Pago único {{oferta_2}} 2️⃣ Cuotas {{hasta_6_cuotas}}', 'siguiente': 'seleccionar_plan'}
+        }
+    
+    def process_user_message(self, conversation_id: int, user_message: str, 
+                            current_state: str, context_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        ✅ MÉTODO DE COMPATIBILIDAD - Wrapper para procesar_mensaje
+        
+        Este método mantiene compatibilidad con la interfaz original
+        mientras usa internamente el método optimizado.
+        """
+        try:
+            print(f"🔄 FlowManager procesando mensaje (modo compatibilidad)")
+            
+            # Llamar al método principal optimizado
+            resultado = self.procesar_mensaje(
+                conversation_id=conversation_id,
+                mensaje_usuario=user_message,
+                estado_actual=current_state,
+                contexto=context_data
+            )
+            
+            # Adaptar formato de respuesta si es necesario
+            if resultado and isinstance(resultado, dict):
+                # Asegurar que tenga los campos esperados
+                return {
+                    'message': resultado.get('mensaje', resultado.get('message', '¿En qué puedo ayudarte?')),
+                    'next_state': resultado.get('estado_siguiente', current_state),
+                    'buttons': resultado.get('botones', []),
+                    'context_data': resultado.get('contexto_actualizado', context_data),
+                    'exito': resultado.get('exito', True),
+                    'confianza': resultado.get('confianza', 0.5),
+                    'intencion_detectada': resultado.get('intencion', 'CONTINUACION'),
+                    'metodo': resultado.get('metodo', 'FLOW_MANAGER'),
+                    'datos_cliente_encontrados': resultado.get('exito', False) and context_data.get('cliente_encontrado', False)
+                }
+            else:
+                # Respuesta de fallback
+                return {
+                    'message': '¿En qué puedo ayudarte?',
+                    'next_state': current_state,
+                    'buttons': [],
+                    'context_data': context_data,
+                    'exito': False,
+                    'confianza': 0.0,
+                    'intencion_detectada': 'ERROR',
+                    'metodo': 'FALLBACK',
+                    'datos_cliente_encontrados': False
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error en process_user_message: {e}")
+            return {
+                'message': 'Ha ocurrido un error técnico. ¿Podrías intentar de nuevo?',
+                'next_state': 'inicial',
+                'buttons': [],
+                'context_data': context_data,
+                'exito': False,
+                'confianza': 0.0,
+                'intencion_detectada': 'ERROR',
+                'metodo': 'ERROR_HANDLER',
+                'datos_cliente_encontrados': False
+            }
+
+    def _consultar_cliente_por_cedula(self, cedula: str) -> Dict[str, Any]:
+        """
+        ✅ MÉTODO PÚBLICO - Para compatibilidad con test de cédulas
+        """
+        try:
+            return self._query_client(cedula)
+        except Exception as e:
+            logger.error(f"Error consultando cliente {cedula}: {e}")
+            return {'encontrado': False, 'error': str(e)}
+    
+    def _load_ml_model(self):
+        """Cargar modelo ML más reciente"""
+        if self.config.get('ml_enabled', 'true').lower() != 'true':
+            logger.info("🔄 ML deshabilitado por configuración")
+            return
+        
+        try:
+            import joblib
+            from pathlib import Path
+            
+            models_dir = Path("models")
+            if models_dir.exists():
+                # Buscar modelo más reciente
+                patterns = ["*IMPROVED*.joblib", "*BD_*.joblib", "*FIXED*.joblib", "*.joblib"]
+                
+                for pattern in patterns:
+                    models = list(models_dir.glob(pattern))
+                    if models:
+                        latest_model = max(models, key=lambda x: x.stat().st_mtime)
+                        self.ml_model = joblib.load(latest_model)
+                        logger.info(f"✅ Modelo ML cargado: {latest_model.name}")
+                        return
+            
+            logger.warning("⚠️ No se encontró modelo ML")
+            
+        except Exception as e:
+            logger.error(f"❌ Error cargando modelo ML: {e}")
+    
+    def _setup_openai(self):
+        """Configurar OpenAI si está habilitado"""
+        if self.config.get('openai_enabled', 'false').lower() != 'true':
+            logger.info("🔄 OpenAI deshabilitado por configuración")
+            return
+        
+        try:
+            import os
+            from app.services.openai_service import openai_service
+            
+            api_key = os.getenv('OPENAI_API_KEY')
+            if api_key and api_key.startswith('sk-'):
+                self.openai_service = openai_service
+                logger.info("✅ OpenAI configurado")
+            else:
+                logger.warning("⚠️ OPENAI_API_KEY no válida")
+                
+        except Exception as e:
+            logger.error(f"❌ Error configurando OpenAI: {e}")
+    
+    def _cleanup_cache(self):
+        """Limpiar cache expirado"""
+        now = time.time()
+        expired_keys = [
+            key for key, ttl in self.cache_ttl.items() 
+            if ttl < now
+        ]
+        
+        for key in expired_keys:
+            self.cache.pop(key, None)
+            self.cache_ttl.pop(key, None)
+        
+        # Limitar tamaño del cache
+        if len(self.cache) > self.cache_max_size:
+            # Eliminar 20% más viejo
+            sorted_items = sorted(self.cache_ttl.items(), key=lambda x: x[1])
+            to_remove = len(sorted_items) // 5
+            
+            for key, _ in sorted_items[:to_remove]:
+                self.cache.pop(key, None)
+                self.cache_ttl.pop(key, None)
+        
+        logger.debug(f"🧹 Cache limpiado: {len(self.cache)} items restantes")
+    
+    # ==========================================
+    # MÉTODO PRINCIPAL - JERARQUÍA INTELIGENTE
+    # ==========================================
+    
+    def procesar_mensaje(self, conversation_id: int, mensaje_usuario: str, 
+                        estado_actual: str, contexto: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Procesamiento jerárquico inteligente:
+        1. Cache check (0ms)
+        2. Reglas críticas (1ms) 
+        3. ML principal (50ms)
+        4. OpenAI refinamiento (500ms) - solo si es necesario
+        """
+        
+        start_time = time.time()
+        self.metrics['total_requests'] += 1
+        
+        try:
+            # Limpiar mensaje
+            mensaje_limpio = self._clean_message(mensaje_usuario)
+            
+            # 1. CHECK CACHE PRIMERO (0ms)
+            cache_key = self._generate_cache_key(mensaje_limpio, estado_actual)
+            cached_result = self._get_from_cache(cache_key)
+            
+            if cached_result:
+                self.metrics['cache_hits'] += 1
+                logger.debug(f"💨 Cache hit para: '{mensaje_usuario[:20]}...'")
+                return self._apply_context(cached_result, contexto)
+            
+            # 2. REGLAS CRÍTICAS (1ms) - SIEMPRE PRIMERO
+            rule_result = self._apply_critical_rules(mensaje_limpio, estado_actual, contexto)
+            if rule_result['priority'] == 'CRITICAL':
+                self.metrics['rule_hits'] += 1
+                self._save_to_cache(cache_key, rule_result, ttl=300)  # 5 min
+                
+                execution_time = (time.time() - start_time) * 1000
+                logger.info(f"⚡ Regla crítica aplicada en {execution_time:.1f}ms")
+                return rule_result
+            
+            # 3. ML PRINCIPAL (50ms) - MAYORÍA DE CASOS
+            if self.ml_model:
+                ml_result = self._classify_with_ml(mensaje_limpio, estado_actual, contexto)
+                
+                confidence_threshold = float(self.config.get('confidence_threshold_ml', '0.7'))
+                
+                if ml_result['confianza'] >= confidence_threshold:
+                    self.metrics['ml_hits'] += 1
+                    self._save_to_cache(cache_key, ml_result, ttl=600)  # 10 min
+                    
+                    execution_time = (time.time() - start_time) * 1000
+                    logger.info(f"🤖 ML clasificado en {execution_time:.1f}ms: {ml_result['intencion']}")
+                    return ml_result
+            
+            # 4. OPENAI REFINAMIENTO (500ms) - CASOS COMPLEJOS
+            if self.openai_service and self._should_use_openai(mensaje_limpio, estado_actual):
+                openai_result = self._classify_with_openai(mensaje_limpio, estado_actual, contexto)
+                
+                if openai_result['confianza'] >= 0.8:
+                    self.metrics['openai_hits'] += 1
+                    self._save_to_cache(cache_key, openai_result, ttl=1800)  # 30 min
+                    
+                    execution_time = (time.time() - start_time) * 1000
+                    logger.info(f"🧠 OpenAI refinó en {execution_time:.1f}ms")
+                    return openai_result
+            
+            # 5. FALLBACK A REGLAS SIMPLES
+            fallback_result = self._apply_simple_rules(mensaje_limpio, estado_actual, contexto)
+            self._save_to_cache(cache_key, fallback_result, ttl=120)  # 2 min
+            
+            execution_time = (time.time() - start_time) * 1000
+            logger.info(f"🔄 Fallback aplicado en {execution_time:.1f}ms")
+            return fallback_result
+            
+        except Exception as e:
+            logger.error(f"❌ Error procesando mensaje: {e}")
+            execution_time = (time.time() - start_time) * 1000
+            logger.error(f"💥 Error después de {execution_time:.1f}ms")
+            return self._error_response(contexto)
+    
+    # ==========================================
+    # NIVEL 1: REGLAS CRÍTICAS (ALTA PRIORIDAD)
+    # ==========================================
+    
+    def _apply_critical_rules(self, mensaje: str, estado: str, contexto: Dict) -> Dict[str, Any]:
+        """Reglas críticas que SIEMPRE tienen prioridad"""
+        
+        # 1. DETECCIÓN DE CÉDULA (MÁXIMA PRIORIDAD)
+        cedula = self._detect_cedula(mensaje)
+        if cedula:
+            return self._process_cedula(cedula, contexto)
+        
+        # 2. COMANDOS DE SISTEMA
+        if mensaje in ['reset', 'reiniciar', 'empezar de nuevo']:
+            return self._reset_conversation(contexto)
+        
+        # 3. ESCALAMIENTO A HUMANO
+        if any(word in mensaje for word in ['asesor', 'humano', 'persona', 'supervisor']):
+            return self._escalate_to_human(contexto)
+        
+        # 4. INTENCIONES EXPLÍCITAS CON 100% CONFIANZA
+        explicit_intents = {
+            'si': 'CONFIRMACION',
+            'sí': 'CONFIRMACION', 
+            'no': 'RECHAZO',
+            'acepto': 'CONFIRMACION',
+            'confirmo': 'CONFIRMACION',
+            'rechazo': 'RECHAZO'
+        }
+        
+        if mensaje in explicit_intents:
+            return self._create_response(
+                explicit_intents[mensaje], 1.0, estado, contexto, priority='CRITICAL'
+            )
+        
+        # No es crítico
+        return {'priority': 'NORMAL'}
+    
+    def _detect_cedula(self, mensaje: str) -> Optional[str]:
+        """Detectar cédula con patrones mejorados"""
+        # Buscar patrones de cédula
+        patterns = [
+            r'\b(\d{7,12})\b',  # Números de 7-12 dígitos
+            r'cedula\s*:?\s*(\d{7,12})',
+            r'documento\s*:?\s*(\d{7,12})',
+            r'cc\s*:?\s*(\d{7,12})'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, mensaje, re.IGNORECASE)
+            for match in matches:
+                if 7 <= len(match) <= 12 and len(set(match)) > 1:
+                    return match
+        
+        return None
+    
+    def _process_cedula(self, cedula: str, contexto: Dict) -> Dict[str, Any]:
+        """Procesar cédula detectada"""
+        logger.info(f"🎯 Cédula detectada: {cedula}")
+        
+        # Consultar cliente
+        cliente_info = self._query_client(cedula)
+        
+        if cliente_info and cliente_info.get('encontrado'):
+            contexto.update(cliente_info)
+            
+            return {
+                'estado_siguiente': 'informar_deuda',
+                'mensaje': self._resolve_template(
+                    self.estados_cache['informar_deuda']['mensaje'], 
+                    contexto
+                ),
+                'botones': [
+                    {'id': 'si', 'texto': 'Sí, quiero opciones'},
+                    {'id': 'no', 'texto': 'No por ahora'}
+                ],
+                'contexto_actualizado': contexto,
+                'exito': True,
+                'confianza': 1.0,
+                'metodo': 'REGLA_CRITICA',
+                'priority': 'CRITICAL'
+            }
+        else:
+            return {
+                'estado_siguiente': 'cliente_no_encontrado',
+                'mensaje': f'No encontré información para la cédula {cedula}. ¿Podrías verificar?',
+                'botones': [{'id': 'retry', 'texto': 'Intentar de nuevo'}],
+                'contexto_actualizado': contexto,
+                'exito': False,
+                'confianza': 1.0,
+                'metodo': 'REGLA_CRITICA',
+                'priority': 'CRITICAL'
+            }
+    
+    # ==========================================
+    # NIVEL 2: CLASIFICACIÓN ML (PRINCIPAL)
+    # ==========================================
+    
+    def _classify_with_ml(self, mensaje: str, estado: str, contexto: Dict) -> Dict[str, Any]:
+        """Clasificación principal con ML"""
+        try:
+            prediccion = self.ml_model.predict([mensaje])[0]
+            probabilidades = self.ml_model.predict_proba([mensaje])[0]
+            confianza = max(probabilidades)
+            
+            # Mapear intención a acción
+            return self._map_intention_to_action(prediccion, confianza, estado, contexto, 'ML')
+            
+        except Exception as e:
+            logger.error(f"❌ Error en ML: {e}")
+            return {'confianza': 0.0}
+    
+    def _map_intention_to_action(self, intencion: str, confianza: float, 
+                                estado: str, contexto: Dict, metodo: str) -> Dict[str, Any]:
+        """Mapear intención ML a acción concreta"""
+        
+        # Mapeo intención → estado siguiente
+        intention_map = {
+            'CONSULTA_DEUDA': 'informar_deuda',
+            'INTENCION_PAGO': 'proponer_planes_pago',
+            'SOLICITUD_PLAN': 'proponer_planes_pago',
+            'CONFIRMACION': self._get_confirmation_target(estado),
+            'RECHAZO': 'gestionar_objecion',
+            'SALUDO': 'inicial',
+            'DESPEDIDA': 'finalizar_conversacion',
+            'IDENTIFICACION': 'validar_documento'
+        }
+        
+        estado_siguiente = intention_map.get(intencion, estado)
+        
+        return self._create_response(intencion, confianza, estado_siguiente, contexto, metodo)
+    
+    def _get_confirmation_target(self, estado_actual: str) -> str:
+        """Determinar a dónde ir cuando confirman"""
+        confirmation_flow = {
+            'informar_deuda': 'proponer_planes_pago',
+            'proponer_planes_pago': 'seleccionar_plan',
+            'seleccionar_plan': 'generar_acuerdo',
+            'generar_acuerdo': 'finalizar_conversacion'
+        }
+        return confirmation_flow.get(estado_actual, 'proponer_planes_pago')
+    
+    # ==========================================
+    # NIVEL 3: OPENAI REFINAMIENTO (COMPLEJO)
+    # ==========================================
+    
+    def _should_use_openai(self, mensaje: str, estado: str) -> bool:
+        """Determinar si usar OpenAI para casos complejos"""
+        
+        # Usar OpenAI solo para:
+        complex_indicators = [
+            len(mensaje.split()) > 10,  # Mensajes largos
+            any(word in mensaje for word in [
+                'porque', 'pero', 'aunque', 'sin embargo', 'no obstante',
+                'explicar', 'entender', 'confuso', 'dudas'
+            ]),  # Mensajes con matices
+            estado in ['gestionar_objecion', 'manejo_timeout'],  # Estados complejos
+            '?' in mensaje and len(mensaje) > 15  # Preguntas complejas
+        ]
+        
+        return any(complex_indicators)
+    
+    def _classify_with_openai(self, mensaje: str, estado: str, contexto: Dict) -> Dict[str, Any]:
+        """Usar OpenAI para casos complejos"""
+        try:
+            # Prompt optimizado para casos específicos
+            prompt = f"""
+            Analiza este mensaje del cliente en el contexto de negociación de deudas:
+            
+            Mensaje: "{mensaje}"
+            Estado actual: {estado}
+            
+            Clasifica la intención principal en una de estas categorías:
+            - CONSULTA_DEUDA: Pregunta sobre saldo o deuda
+            - INTENCION_PAGO: Quiere pagar o conocer opciones
+            - SOLICITUD_PLAN: Busca facilidades o descuentos
+            - CONFIRMACION: Acepta propuesta
+            - RECHAZO: Rechaza propuesta
+            - OBJECION: Pone objeciones o dudas
+            - SALUDO: Saluda
+            - DESPEDIDA: Se despide
+            
+            Responde solo con: CATEGORIA,confianza(0.0-1.0)
+            """
+            
+            response = self.openai_service.get_completion(prompt, max_tokens=50)
+            
+            if response and ',' in response:
+                parts = response.strip().split(',')
+                intencion = parts[0].strip()
+                confianza = float(parts[1].strip())
+                
+                return self._map_intention_to_action(intencion, confianza, estado, contexto, 'OPENAI')
+            
+            return {'confianza': 0.0}
+            
+        except Exception as e:
+            logger.error(f"❌ Error en OpenAI: {e}")
+            return {'confianza': 0.0}
+    
+    # ==========================================
+    # CACHE UNIFICADO
+    # ==========================================
+    
+    def _generate_cache_key(self, mensaje: str, estado: str) -> str:
+        """Generar clave de cache única"""
+        content = f"{mensaje}|{estado}"
+        return hashlib.md5(content.encode()).hexdigest()[:16]
+    
+    def _get_from_cache(self, key: str) -> Optional[Dict]:
+        """Obtener del cache con verificación TTL"""
+        if not self.config.get('cache_enabled', 'true').lower() == 'true':
+            return None
+        
+        now = time.time()
+        if key in self.cache and self.cache_ttl.get(key, 0) > now:
+            return self.cache[key].copy()
+        
+        # Eliminar si expiró
+        if key in self.cache:
+            self.cache.pop(key, None)
+            self.cache_ttl.pop(key, None)
+        
+        return None
+    
+    def _save_to_cache(self, key: str, result: Dict, ttl: int = 300):
+        """Guardar en cache con TTL"""
+        if not self.config.get('cache_enabled', 'true').lower() == 'true':
+            return
+        
+        self.cache[key] = result.copy()
+        self.cache_ttl[key] = time.time() + ttl
+        
+        # Limpiar cache si está muy grande
+        if len(self.cache) > self.cache_max_size:
+            self._cleanup_cache()
+    
+    # ==========================================
+    # UTILIDADES
+    # ==========================================
+    
+    def _clean_message(self, mensaje: str) -> str:
+        """Limpiar mensaje manteniendo cédulas"""
+        if not mensaje:
+            return ""
+        
+        mensaje = mensaje.lower().strip()
+        mensaje = re.sub(r'[^\w\s\d]', ' ', mensaje)
+        mensaje = re.sub(r'\s+', ' ', mensaje)
+        
+        return mensaje
+    
+    def _query_client(self, cedula: str) -> Dict[str, Any]:
+        """Consultar cliente en BD"""
+        try:
+            query = text("""
+                SELECT TOP 1 Nombre_del_cliente, Saldo_total, banco, Oferta_2, Hasta_6_cuotas
+                FROM ConsolidadoCampañasNatalia 
+                WHERE CAST(Cedula AS VARCHAR) = :cedula
+            """)
+            
+            result = self.db.execute(query, {"cedula": cedula}).fetchone()
+            
+            if result:
+                return {
+                    'encontrado': True,
+                    'nombre_cliente': result[0] or 'Cliente',
+                    'saldo_total': f"${float(result[1]):,.0f}" if result[1] else '$0',
+                    'banco': result[2] or 'Entidad Financiera',
+                    'oferta_2': f"${float(result[3]):,.0f}" if result[3] else '$0',
+                    'hasta_6_cuotas': f"${float(result[4]):,.0f}" if result[4] else '$0'
+                }
+            
+            return {'encontrado': False}
+            
+        except Exception as e:
+            logger.error(f"❌ Error consultando cliente: {e}")
+            return {'encontrado': False}
+    
+    def _resolve_template(self, template: str, contexto: Dict) -> str:
+        """Resolver variables en templates"""
+        if not template:
+            return "¿En qué puedo ayudarte?"
+        
+        result = template
+        for key, value in contexto.items():
+            placeholder = f"{{{{{key}}}}}"
+            if placeholder in result:
+                result = result.replace(placeholder, str(value))
+        
+        return result
+    
+    def _create_response(self, intencion: str, confianza: float, estado_siguiente: str, 
+                        contexto: Dict, metodo: str, priority: str = 'NORMAL') -> Dict[str, Any]:
+        """Crear respuesta estructurada"""
+        
+        if estado_siguiente not in self.estados_cache:
+            estado_siguiente = 'inicial'
+        
+        config_estado = self.estados_cache[estado_siguiente]
+        mensaje = self._resolve_template(config_estado['mensaje'], contexto)
+        
+        return {
+            'estado_siguiente': estado_siguiente,
+            'mensaje': mensaje,
+            'botones': self._get_buttons(estado_siguiente),
+            'contexto_actualizado': contexto,
+            'exito': True,
+            'confianza': confianza,
+            'intencion': intencion,
+            'metodo': metodo,
+            'priority': priority
+        }
+    
+    def _get_buttons(self, estado: str) -> list:
+        """Obtener botones para estado"""
+        button_map = {
+            'informar_deuda': [
+                {'id': 'si', 'texto': 'Sí, quiero opciones'},
+                {'id': 'no', 'texto': 'No por ahora'}
+            ],
+            'proponer_planes_pago': [
+                {'id': 'plan1', 'texto': 'Pago único'},
+                {'id': 'plan2', 'texto': 'Plan cuotas'},
+                {'id': 'info', 'texto': 'Más información'}
+            ],
+            'seleccionar_plan': [
+                {'id': 'confirmar', 'texto': 'Confirmar'},
+                {'id': 'cambiar', 'texto': 'Ver otras opciones'}
+            ]
+        }
+        return button_map.get(estado, [])
+    
+    def _apply_simple_rules(self, mensaje: str, estado: str, contexto: Dict) -> Dict[str, Any]:
+        """Reglas simples como último recurso"""
+        
+        # Reglas básicas de fallback
+        if any(word in mensaje for word in ['pag', 'option', 'plan']):
+            return self._create_response('INTENCION_PAGO', 0.6, 'proponer_planes_pago', contexto, 'REGLA_SIMPLE')
+        
+        elif any(word in mensaje for word in ['cuant', 'deud', 'sald']):
+            return self._create_response('CONSULTA_DEUDA', 0.6, 'informar_deuda', contexto, 'REGLA_SIMPLE')
+        
+        else:
+            # Continuar en estado actual
+            return self._create_response('CONTINUACION', 0.5, estado, contexto, 'REGLA_SIMPLE')
+    
+    def _error_response(self, contexto: Dict) -> Dict[str, Any]:
+        """Respuesta de error"""
+        return {
+            'estado_siguiente': 'inicial',
+            'mensaje': 'Ha ocurrido un error. ¿Podrías intentar de nuevo?',
+            'botones': [{'id': 'reiniciar', 'texto': 'Reiniciar'}],
+            'contexto_actualizado': contexto,
+            'exito': False,
+            'confianza': 0.0,
+            'metodo': 'ERROR'
+        }
+    
+    def _apply_context(self, cached_result: Dict, contexto: Dict) -> Dict[str, Any]:
+        """Aplicar contexto actual a resultado cacheado"""
+        result = cached_result.copy()
+        result['contexto_actualizado'] = contexto
+        if 'mensaje' in result:
+            result['mensaje'] = self._resolve_template(result['mensaje'], contexto)
+        return result
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """Obtener métricas de rendimiento"""
+        total = max(self.metrics['total_requests'], 1)
+        
+        return {
+            'total_requests': total,
+            'cache_hit_rate': f"{(self.metrics['cache_hits'] / total) * 100:.1f}%",
+            'rule_usage': f"{(self.metrics['rule_hits'] / total) * 100:.1f}%",
+            'ml_usage': f"{(self.metrics['ml_hits'] / total) * 100:.1f}%",
+            'openai_usage': f"{(self.metrics['openai_hits'] / total) * 100:.1f}%",
+            'cache_size': len(self.cache),
+            'systems_status': {
+                'ml_available': self.ml_model is not None,
+                'openai_available': self.openai_service is not None,
+                'cache_enabled': self.config.get('cache_enabled', 'true') == 'true'
+            }
+        }
+
+# ==========================================
+# FACTORY FUNCTION
+# ==========================================
+
+def create_optimized_flow_manager(db: Session) -> OptimizedFlowManager:
+    """Factory para crear flow manager optimizado"""
+    return OptimizedFlowManager(db)

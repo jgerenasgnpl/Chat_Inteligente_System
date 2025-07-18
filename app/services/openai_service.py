@@ -1,280 +1,536 @@
+"""
+🤖 OPENAI SERVICE CORREGIDO PARA VERSIÓN v1.0+
+- Compatibilidad con nuevas versiones de openai
+- Manejo robusto de errores de inicialización
+- Sin parámetros deprecated
+"""
+
 import os
 import logging
-from typing import Dict, Any, Optional
+import json
+from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
+from datetime import datetime
+import hashlib
+from app.services.cache_service import cache_service, cache_result
 
-# Cargar variables de entorno
 load_dotenv()
-
 logger = logging.getLogger(__name__)
 
-class OpenAIService:
-    """Servicio para integración con OpenAI GPT"""
+class OpenAICobranzaService:
+    """Servicio OpenAI optimizado específicamente para gestión de cobranza"""
     
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.client = None
         self.disponible = False
         
-        if self.api_key:
-            try:
-                from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
-                self.disponible = True
-                logger.info("✅ OpenAI Service inicializado correctamente")
-            except ImportError:
-                logger.warning("⚠️ OpenAI library no instalada. Instalar con: pip install openai")
-            except Exception as e:
-                logger.error(f"❌ Error inicializando OpenAI: {e}")
-        else:
-            logger.warning("⚠️ OPENAI_API_KEY no encontrada en variables de entorno")
-    
-    def humanizar_respuesta(self, mensaje_original: str, contexto: Dict[str, Any]) -> str:
-        """
-        Humaniza una respuesta usando GPT
+        # ✅ CONFIGURACIÓN PARA 80% DE USO
+        self.USE_OPENAI_PERCENTAGE = 80  # 80% de los casos usarán OpenAI
+        self.MIN_CONFIDENCE_THRESHOLD = 0.3  # Umbral mínimo para activar OpenAI
         
-        Args:
-            mensaje_original: Mensaje a humanizar
-            contexto: Contexto de la conversación
+        # ✅ PROMPTS ESPECIALIZADOS EN COBRANZA
+        self.cobranza_prompts = {
+            "system_base": """Eres un especialista en gestión de cobranza profesional y empático de Systemgroup. 
+
+CARACTERÍSTICAS PRINCIPALES:
+- Siempre mantén un tono profesional pero humano
+- Enfócate en encontrar soluciones viables para el cliente
+- Usa técnicas de persuasión ética y empática
+- Personaliza cada respuesta con los datos del cliente
+- Evita ser agresivo o amenazante
+- Siempre ofrece alternativas flexibles
+
+INFORMACIÓN EMPRESA:
+- Empresa: Systemgroup
+- Función: Gestión de obligaciones financieras
+- Objetivo: Encontrar acuerdos de pago beneficiosos para ambas partes""",
             
-        Returns:
-            Mensaje humanizado o mensaje original si hay error
-        """
-        if not self.disponible or not self.client:
-            logger.debug("OpenAI no disponible, devolviendo mensaje original")
-            return mensaje_original
+            "negociacion": """Estás en una negociación de deuda. El cliente {nombre} tiene una deuda de ${saldo:,} con {banco}.
+
+ESTRATEGIA DE NEGOCIACIÓN:
+1. Reconoce la situación del cliente
+2. Presenta las ofertas de manera atractiva
+3. Enfatiza los beneficios y ahorros
+4. Crea urgencia sin presionar
+5. Ofrece flexibilidad en los términos
+
+OFERTAS DISPONIBLES:
+- Pago único: ${oferta_unica:,} (Ahorro: ${ahorro:,})
+- Plan cuotas: {cuotas} pagos de ${valor_cuota:,}
+- Pago flexible: Desde ${pago_minimo:,}
+
+Genera una respuesta persuasiva y empática.""",
+            
+            "objecion": """El cliente {nombre} ha puesto una objeción: "{objecion}"
+
+TÉCNICAS PARA MANEJAR OBJECIONES:
+1. Escucha activa: "Entiendo que..."
+2. Valida su preocupación
+3. Reframe: Presenta la situación de manera positiva
+4. Ofrece alternativas específicas
+5. Busca compromiso parcial
+
+RESPUESTA: Genera una respuesta que maneje la objeción de manera empática y ofrezca soluciones.""",
+            
+            "cierre": """Es momento de cerrar el acuerdo con {nombre}.
+
+TÉCNICAS DE CIERRE:
+1. Resumen de beneficios
+2. Crear urgencia apropiada
+3. Simplificar la decisión
+4. Asumir la venta
+5. Ofrecer garantías
+
+Genera un cierre persuasivo pero respetuoso.""",
+            
+            "seguimiento": """Necesitas hacer seguimiento a {nombre} que no ha respondido.
+
+ESTRATEGIA DE SEGUIMIENTO:
+1. Reconocer la demora sin juzgar
+2. Reafirmar la oferta
+3. Ofrecer asistencia adicional
+4. Mantener la puerta abierta
+5. Proporcionar alternativas de contacto
+
+Genera un mensaje de seguimiento profesional."""
+        }
+        
+        # ✅ INICIALIZAR OPENAI CON MANEJO ROBUSTO
+        self._initialize_openai_client()
+    
+    def _initialize_openai_client(self):
+        """✅ INICIALIZACIÓN CORREGIDA PARA OPENAI v1.0+"""
+        if not self.api_key:
+            logger.warning("⚠️ OPENAI_API_KEY no configurada")
+            print("⚠️ OPENAI_API_KEY no encontrada en variables de entorno")
+            return
         
         try:
-            # Extraer información del contexto
-            nombre = contexto.get("Nombre_del_cliente", contexto.get("nombre_cliente", "Cliente"))
-            banco = contexto.get("banco", "Entidad Financiera")
-            saldo = contexto.get("saldo_total", 0)
-            estado = contexto.get("estado_actual", "negociación")
-            intencion = contexto.get("intencion_detectada", "")
+            # ✅ IMPORTAR Y VERIFICAR VERSIÓN
+            import openai
+            logger.info(f"📦 OpenAI version: {getattr(openai, '__version__', 'unknown')}")
             
-            # Crear prompt optimizado para cobranza
-            prompt = self._crear_prompt_cobranza(mensaje_original, {
-                "nombre": nombre,
-                "banco": banco, 
-                "saldo": saldo,
-                "estado": estado,
-                "intencion": intencion
-            })
+            # ✅ INICIALIZACIÓN COMPATIBLE CON v1.0+
+            from openai import OpenAI
             
-            # Llamar a GPT
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "Eres un asistente de negociación de deudas profesional, empático y efectivo. Tu objetivo es ayudar a los clientes a encontrar soluciones de pago viables manteniendo un tono amigable pero profesional."
-                    },
-                    {
-                        "role": "user", 
-                        "content": prompt
-                    }
-                ],
-                temperature=0.7,
-                max_tokens=400,
-                presence_penalty=0.1,
-                frequency_penalty=0.1
+            # ✅ CONFIGURACIÓN SIMPLE SIN PARÁMETROS DEPRECATED
+            self.client = OpenAI(
+                api_key=self.api_key,
+                # ✅ Eliminar parámetros deprecated como 'proxies'
+                timeout=30.0,  # Timeout en segundos
+                max_retries=2  # Número de reintentos
             )
             
-            mensaje_humanizado = response.choices[0].message.content.strip()
+            # ✅ TEST DE CONEXIÓN BÁSICO
+            test_response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Eres un asistente de prueba."},
+                    {"role": "user", "content": "Di 'test exitoso' en una palabra."}
+                ],
+                max_tokens=5,
+                temperature=0
+            )
             
-            # Validar que la respuesta sea apropiada
-            if self._validar_respuesta(mensaje_humanizado):
-                logger.info(f"🤖 GPT humanizó mensaje exitosamente")
-                return mensaje_humanizado
+            if test_response and test_response.choices:
+                self.disponible = True
+                logger.info("✅ OpenAI Cobranza Service inicializado y probado")
+                print("🤖 OpenAI optimizado para COBRANZA activado")
+                print(f"🔑 API Key configurada: {self.api_key[:8]}...{self.api_key[-4:]}")
             else:
-                logger.warning("⚠️ Respuesta GPT no pasó validación, usando original")
-                return mensaje_original
+                logger.error("❌ Test de OpenAI falló - respuesta vacía")
+                print("❌ Test de OpenAI falló")
                 
+        except ImportError as e:
+            logger.error(f"❌ Error importando OpenAI: {e}")
+            print(f"❌ Error: Instalar openai con: pip install openai>=1.0.0")
+            
         except Exception as e:
-            logger.error(f"❌ Error humanizando con GPT: {e}")
-            return mensaje_original
+            logger.error(f"❌ Error inicializando OpenAI: {e}")
+            print(f"❌ Error inicializando OpenAI: {e}")
+            
+            # ✅ DIAGNÓSTICO DETALLADO
+            self._diagnostic_openai_error(e)
     
-    def _crear_prompt_cobranza(self, mensaje: str, contexto: Dict[str, Any]) -> str:
-        """Crea prompt optimizado para cobranza"""
+    def _diagnostic_openai_error(self, error: Exception):
+        """✅ DIAGNÓSTICO DETALLADO DE ERRORES DE OPENAI"""
+        error_str = str(error).lower()
         
-        nombre = contexto.get("nombre", "Cliente")
-        banco = contexto.get("banco", "Entidad Financiera")
-        saldo = contexto.get("saldo", 0)
-        estado = contexto.get("estado", "negociación")
-        intencion = contexto.get("intencion", "")
+        print(f"\n🔍 DIAGNÓSTICO DE ERROR OPENAI:")
+        print(f"   Error: {error}")
+        print(f"   Tipo: {type(error).__name__}")
         
-        # Formatear saldo
-        if isinstance(saldo, (int, float)) and saldo > 0:
-            saldo_formatted = f"${saldo:,.0f}"
-        elif isinstance(saldo, str) and "$" in saldo:
-            saldo_formatted = saldo
+        # ✅ DIAGNÓSTICOS ESPECÍFICOS
+        if "proxies" in error_str:
+            print(f"   🔧 SOLUCIÓN: Actualizar librería openai")
+            print(f"   📦 Ejecutar: pip install --upgrade openai>=1.0.0")
+            
+        elif "api_key" in error_str or "unauthorized" in error_str:
+            print(f"   🔑 PROBLEMA: API Key inválida o faltante")
+            print(f"   🔧 SOLUCIÓN: Verificar OPENAI_API_KEY en .env")
+            
+        elif "timeout" in error_str or "connection" in error_str:
+            print(f"   🌐 PROBLEMA: Conectividad")
+            print(f"   🔧 SOLUCIÓN: Verificar conexión a internet")
+            
+        elif "rate" in error_str or "quota" in error_str:
+            print(f"   💰 PROBLEMA: Límites de API")
+            print(f"   🔧 SOLUCIÓN: Verificar créditos en OpenAI")
+            
         else:
-            saldo_formatted = "un monto pendiente"
+            print(f"   ❓ Error desconocido - revisar documentación OpenAI")
         
-        prompt = f"""
-Humaniza este mensaje de negociación de deudas manteniendo la información clave:
-
-MENSAJE ORIGINAL:
-{mensaje}
-
-CONTEXTO DEL CLIENTE:
-- Nombre: {nombre}
-- Entidad: {banco}
-- Saldo: {saldo_formatted}
-- Estado conversación: {estado}
-- Intención detectada: {intencion}
-
-INSTRUCCIONES:
-1. Mantén toda la información específica (montos, opciones, descuentos)
-2. Usa un tono empático pero profesional
-3. Personaliza con el nombre del cliente cuando sea apropiado
-4. Mantén las opciones numeradas si existen
-5. Conserva emojis y formato si ayudan a la claridad
-6. NO inventes información nueva
-7. Máximo 300 palabras
-8. Enfócate en soluciones, no en problemas
-
-RESPUESTA HUMANIZADA:"""
-        
-        return prompt
+        print(f"   📚 Docs: https://platform.openai.com/docs")
+        print()
     
-    def _validar_respuesta(self, respuesta: str) -> bool:
-        """Valida que la respuesta GPT sea apropiada"""
-        if not respuesta or len(respuesta.strip()) < 10:
+    def should_use_openai(self, mensaje: str, contexto: Dict[str, Any], estado: str) -> bool:
+        """
+        ✅ DECISOR INTELIGENTE - 80% de uso en casos relevantes
+        """
+        
+        if not self.disponible:
             return False
         
-        # Palabras/frases que no deberían aparecer
-        palabras_prohibidas = [
-            "no puedo ayudar",
-            "lo siento, no puedo",
-            "asistente de ia",
-            "modelo de lenguaje",
-            "openai",
-            "gpt"
+        # 1. CASOS DONDE SIEMPRE USAR OPENAI (Alta prioridad)
+        casos_alta_prioridad = [
+            # Estados críticos de negociación
+            estado in ["proponer_planes_pago", "evaluar_intencion_pago", "gestionar_objecion", "generar_acuerdo"],
+            
+            # Cliente con datos (personalización)
+            contexto.get("Nombre_del_cliente") and contexto.get("saldo_total", 0) > 0,
+            
+            # Mensajes complejos que requieren manejo empático
+            any(palabra in mensaje.lower() for palabra in [
+                "no puedo", "difícil", "problema", "crisis", "desempleo", 
+                "porque", "pero", "sin embargo", "explicar", "no entiendo"
+            ]),
+            
+            # Objeciones o resistencias
+            any(palabra in mensaje.lower() for palabra in [
+                "no me interesa", "muy caro", "no tengo", "imposible", 
+                "no reconozco", "ya pagué", "no es mío"
+            ]),
+            
+            # Solicitudes de información o negociación
+            any(palabra in mensaje.lower() for palabra in [
+                "descuento", "rebaja", "plan", "cuotas", "facilidades",
+                "opciones", "alternativas", "ayuda", "asesor"
+            ])
         ]
         
-        respuesta_lower = respuesta.lower()
-        for palabra in palabras_prohibidas:
-            if palabra in respuesta_lower:
-                return False
-        
-        return True
-    
-    def detectar_intencion_avanzada(self, mensaje: str, contexto: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Detecta intención usando GPT (complemento al ML)
-        
-        Args:
-            mensaje: Mensaje del usuario
-            contexto: Contexto opcional
+        # 2. CASOS DONDE NO USAR OPENAI (Evitar sobreuso)
+        casos_baja_prioridad = [
+            # Mensajes muy cortos o básicos
+            len(mensaje.strip()) < 3,
             
-        Returns:
-            Diccionario con intención detectada y confianza
+            # Solo números (probablemente cédulas)
+            mensaje.strip().isdigit(),
+            
+            # Estados técnicos
+            estado in ["inicial", "validar_documento", "cliente_no_encontrado", "fin"],
+            
+            # Respuestas muy simples
+            mensaje.lower().strip() in ["si", "sí", "no", "ok", "hola", "adiós"]
+        ]
+        
+        # 3. LÓGICA DE DECISIÓN
+        if any(casos_alta_prioridad):
+            uso_openai = 95  # 95% probabilidad
+        elif any(casos_baja_prioridad):
+            uso_openai = 20   # 20% probabilidad  
+        else:
+            uso_openai = self.USE_OPENAI_PERCENTAGE  # 80% por defecto
+        
+        # 4. DECISIÓN FINAL ALEATORIA
+        import random
+        decision = random.randint(1, 100) <= uso_openai
+        
+        if decision:
+            logger.info(f"🤖 OpenAI activado ({uso_openai}% probabilidad) para: '{mensaje[:30]}...'")
+        else:
+            logger.info(f"⚡ Usando ML/Reglas ({100-uso_openai}% probabilidad) para: '{mensaje[:30]}...'")
+        
+        return decision
+    
+    def procesar_mensaje_cobranza(self, mensaje: str, contexto: Dict[str, Any], estado: str) -> Dict[str, Any]:
         """
+        ✅ PROCESADOR PRINCIPAL - Manejo inteligente con prompts de cobranza
+        """
+        
+        if not self.should_use_openai(mensaje, contexto, estado):
+            return {"enhanced": False, "reason": "openai_not_selected"}
+        
         if not self.disponible:
-            return {"intencion": "DESCONOCIDA", "confianza": 0.0, "metodo": "gpt_no_disponible"}
+            return {"enhanced": False, "reason": "openai_not_available"}
         
         try:
-            prompt = f"""
-Analiza la intención del siguiente mensaje en el contexto de cobranza/negociación:
-
-MENSAJE: "{mensaje}"
-
-Clasifica en una de estas categorías:
-- CONSULTA_DEUDA: Cliente pregunta por su deuda
-- INTENCION_PAGO: Cliente quiere pagar o conocer opciones
-- SOLICITUD_PLAN: Cliente busca plan de pagos o descuentos
-- CONFIRMACION: Cliente acepta o confirma algo
-- RECHAZO: Cliente rechaza o no puede pagar
-- OBJECION: Cliente pone excusas o dificultades
-- IDENTIFICACION: Cliente proporciona datos personales
-- SALUDO: Saludos o inicio de conversación
-- DESPEDIDA: Cliente se despide
-- DESCONOCIDA: No se puede clasificar
-
-Responde SOLO con: CATEGORIA|CONFIANZA_0_A_1|RAZON_BREVE
-
-Ejemplo: SOLICITUD_PLAN|0.85|Cliente menciona cuotas y descuentos
-"""
+            # 1. DETECTAR TIPO DE INTERACCIÓN
+            tipo_interaccion = self._detectar_tipo_interaccion(mensaje, contexto, estado)
             
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Eres un experto en análisis de intenciones para cobranza. Responde solo en el formato solicitado."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=100
+            # 2. GENERAR RESPUESTA ESPECIALIZADA
+            respuesta_openai = self._generar_respuesta_especializada(
+                mensaje, contexto, estado, tipo_interaccion
             )
             
-            resultado = response.choices[0].message.content.strip()
-            partes = resultado.split("|")
+            # 3. VALIDAR Y MEJORAR
+            respuesta_final = self._validar_y_mejorar_respuesta(respuesta_openai, contexto)
             
-            if len(partes) >= 3:
-                return {
-                    "intencion": partes[0].strip(),
-                    "confianza": float(partes[1].strip()),
-                    "razon": partes[2].strip(),
-                    "metodo": "gpt"
-                }
+            return {
+                "enhanced": True,
+                "message": respuesta_final,
+                "tipo_interaccion": tipo_interaccion,
+                "method": "openai_cobranza_especializado"
+            }
             
         except Exception as e:
-            logger.error(f"Error en detección GPT: {e}")
-        
-        return {"intencion": "DESCONOCIDA", "confianza": 0.0, "metodo": "gpt_error"}
+            logger.error(f"❌ Error en procesamiento OpenAI: {e}")
+            return {"enhanced": False, "reason": f"error: {e}"}
     
-    def generar_respuesta_empatica(self, situacion_cliente: str, contexto: Dict[str, Any]) -> str:
-        """
-        Genera respuesta empática para situaciones difíciles
+    def _detectar_tipo_interaccion(self, mensaje: str, contexto: Dict[str, Any], estado: str) -> str:
+        """Detecta el tipo de interacción para aplicar prompt específico"""
         
-        Args:
-            situacion_cliente: Descripción de la situación (ej: "sin trabajo")
-            contexto: Contexto del cliente
-            
-        Returns:
-            Respuesta empática personalizada
-        """
-        if not self.disponible:
-            return "Entiendo tu situación. ¿Te gustaría que exploremos opciones flexibles que se adapten a tu capacidad actual?"
+        mensaje_lower = mensaje.lower()
         
+        # NEGOCIACIÓN ACTIVA
+        if any(palabra in mensaje_lower for palabra in ["opciones", "descuento", "rebaja", "plan", "cuotas"]):
+            return "negociacion"
+        
+        # MANEJO DE OBJECIONES
+        elif any(palabra in mensaje_lower for palabra in ["no puedo", "imposible", "muy caro", "no tengo"]):
+            return "objecion"
+        
+        # CIERRE DE ACUERDO
+        elif estado in ["generar_acuerdo", "confirmar_plan_elegido"] or "acepto" in mensaje_lower:
+            return "cierre"
+        
+        # SEGUIMIENTO
+        elif estado in ["manejo_timeout", "mensaje_reenganche"]:
+            return "seguimiento"
+        
+        # PRESENTACIÓN/INFORMACIÓN
+        elif estado in ["informar_deuda", "presentacion", "consultar_deuda_directa"]:
+            return "presentacion"
+        
+        # DEFAULT: Negociación general
+        return "negociacion"
+    
+    def _generar_respuesta_especializada(self, mensaje: str, contexto: Dict[str, Any], 
+                                       estado: str, tipo: str) -> str:
+        """Genera respuesta usando prompts especializados en cobranza"""
+        
+        if not self.client:
+            raise Exception("Cliente OpenAI no inicializado")
+        
+        # Extraer datos del contexto
+        nombre = contexto.get("Nombre_del_cliente", "Cliente")
+        saldo = contexto.get("saldo_total", 0)
+        banco = contexto.get("banco", "la entidad financiera")
+        oferta_unica = contexto.get("oferta_2", 0)
+        cuotas_6 = contexto.get("hasta_6_cuotas", 0)
+        
+        # Calcular datos adicionales
+        ahorro = saldo - oferta_unica if saldo > oferta_unica else 0
+        pago_minimo = saldo * 0.1 if saldo > 0 else 0
+        
+        # Seleccionar prompt base
+        if tipo in self.cobranza_prompts:
+            prompt_template = self.cobranza_prompts[tipo]
+        else:
+            prompt_template = self.cobranza_prompts["negociacion"]
+        
+        # Personalizar prompt
+        if tipo == "negociacion":
+            prompt_content = prompt_template.format(
+                nombre=nombre,
+                saldo=saldo,
+                banco=banco,
+                oferta_unica=oferta_unica,
+                ahorro=ahorro,
+                cuotas=6,
+                valor_cuota=cuotas_6,
+                pago_minimo=pago_minimo
+            )
+        elif tipo == "objecion":
+            prompt_content = prompt_template.format(
+                nombre=nombre,
+                objecion=mensaje
+            )
+        elif tipo == "cierre":
+            prompt_content = prompt_template.format(nombre=nombre)
+        elif tipo == "seguimiento":
+            prompt_content = prompt_template.format(nombre=nombre)
+        else:
+            prompt_content = f"Cliente {nombre} en situación: {tipo}. Mensaje: {mensaje}"
+        
+        # Crear contexto completo
+        contexto_completo = f"""DATOS DEL CLIENTE:
+- Nombre: {nombre}
+- Deuda total: ${saldo:,}
+- Banco: {banco}
+- Estado conversación: {estado}
+
+OFERTAS DISPONIBLES:
+- Pago único: ${oferta_unica:,} (Ahorro: ${ahorro:,})
+- Plan 6 cuotas: ${cuotas_6:,} cada una
+- Mínimo sugerido: ${pago_minimo:,}
+
+MENSAJE DEL CLIENTE: "{mensaje}"
+
+{prompt_content}
+
+INSTRUCCIONES ADICIONALES:
+- Máximo 200 palabras
+- Tono profesional pero empático
+- Incluir cifras específicas del cliente
+- Enfocar en beneficios y soluciones
+- Evitar amenazas o presión excesiva
+
+RESPUESTA OPTIMIZADA:"""
+        
+        # ✅ LLAMAR A OPENAI CON NUEVA API
         try:
-            nombre = contexto.get("Nombre_del_cliente", "")
-            saldo = contexto.get("saldo_total", 0)
-            
-            prompt = f"""
-El cliente {nombre} está en una situación difícil: {situacion_cliente}
-Tiene una deuda de {saldo} y necesita una respuesta empática pero constructiva.
-
-Genera una respuesta que:
-1. Muestre empatía genuina por su situación
-2. Ofrezca esperanza y soluciones
-3. Proponga alternativas flexibles
-4. Mantenga profesionalismo
-5. Máximo 150 palabras
-6. Evite sonar robótica o artificial
-
-Situación del cliente: {situacion_cliente}
-"""
-            
             response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "Eres un consejero financiero empático especializado en encontrar soluciones para personas en dificultades económicas."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": self.cobranza_prompts["system_base"]},
+                    {"role": "user", "content": contexto_completo}
                 ],
-                temperature=0.8,
-                max_tokens=200
+                temperature=0.7,  # Balance entre creatividad y consistencia
+                max_tokens=250,
+                # ✅ Eliminar parámetros deprecated
+                # presence_penalty=0.1,  # Algunos modelos no soportan esto
+                # frequency_penalty=0.1   # Algunos modelos no soportan esto
             )
             
             return response.choices[0].message.content.strip()
             
         except Exception as e:
-            logger.error(f"Error generando respuesta empática: {e}")
-            return "Entiendo tu situación. Estoy aquí para ayudarte a encontrar una solución que funcione para ti."
+            logger.error(f"❌ Error llamando OpenAI API: {e}")
+            # ✅ FALLBACK INTELIGENTE
+            return f"Entiendo tu situación, {nombre}. Permíteme revisar las mejores opciones para tu caso. Un asesor te contactará pronto para ofrecerte la mejor solución."
+    
+    def _validar_y_mejorar_respuesta(self, respuesta: str, contexto: Dict[str, Any]) -> str:
+        """Valida y mejora la respuesta de OpenAI"""
+        
+        if not respuesta or len(respuesta.strip()) < 10:
+            return "Permíteme revisar tu situación para ofrecerte la mejor opción."
+        
+        # Palabras/frases prohibidas en cobranza
+        palabras_prohibidas = [
+            "amenaza", "demanda", "embargo", "reporte centrales",
+            "abogados", "juicio", "consecuencias legales"
+        ]
+        
+        respuesta_lower = respuesta.lower()
+        for palabra in palabras_prohibidas:
+            if palabra in respuesta_lower:
+                logger.warning(f"⚠️ Palabra prohibida detectada: {palabra}")
+                return "Estoy aquí para ayudarte a encontrar la mejor solución para tu situación financiera."
+        
+        # Validar que mantenga información del cliente
+        nombre = contexto.get("Nombre_del_cliente", "")
+        if nombre and nombre not in respuesta and len(nombre) > 2:
+            # Agregar nombre al inicio si no está presente
+            respuesta = f"{nombre}, {respuesta}"
+        
+        # Asegurar que termine con pregunta o call-to-action
+        finales_apropiados = ["?", "¿", "contáctame", "conversemos", "te parece"]
+        if not any(final in respuesta.lower() for final in finales_apropiados):
+            respuesta += " ¿Te gustaría conocer más detalles?"
+        
+        return respuesta
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas del uso de OpenAI"""
+        return {
+            "service": "OpenAI Cobranza Optimizado v1.0+",
+            "disponible": self.disponible,
+            "uso_configurado": f"{self.USE_OPENAI_PERCENTAGE}%",
+            "prompts_especializados": len(self.cobranza_prompts),
+            "tipos_interaccion": ["negociacion", "objecion", "cierre", "seguimiento", "presentacion"],
+            "api_key_configured": bool(self.api_key),
+            "client_initialized": self.client is not None
+        }
+    
+    def test_connection(self) -> Dict[str, Any]:
+        """✅ NUEVO - Test de conexión a OpenAI"""
+        if not self.disponible:
+            return {
+                "success": False,
+                "error": "Servicio no disponible",
+                "recommendations": [
+                    "Verificar OPENAI_API_KEY en .env",
+                    "Actualizar librería: pip install --upgrade openai>=1.0.0",
+                    "Verificar créditos en OpenAI Dashboard"
+                ]
+            }
+        
+        try:
+            test_response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "user", "content": "Responde solo 'OK' si me puedes escuchar"}
+                ],
+                max_tokens=5,
+                temperature=0
+            )
+            
+            if test_response.choices and "ok" in test_response.choices[0].message.content.lower():
+                return {
+                    "success": True,
+                    "message": "Conexión OpenAI exitosa",
+                    "model": "gpt-3.5-turbo",
+                    "response": test_response.choices[0].message.content
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Respuesta inesperada de OpenAI",
+                    "response": test_response.choices[0].message.content if test_response.choices else "No response"
+                }
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "recommendations": [
+                    "Verificar API Key",
+                    "Revisar créditos OpenAI",
+                    "Verificar conectividad"
+                ]
+            }
 
-# Instancia global del servicio
-openai_service = OpenAIService()
 
-def crear_openai_service() -> OpenAIService:
-    """Factory para crear instancia del servicio OpenAI"""
-    return openai_service
+# ✅ FACTORY FUNCTION MEJORADA
+def crear_openai_cobranza_service() -> OpenAICobranzaService:
+    """Factory para crear servicio OpenAI optimizado para cobranza"""
+    return OpenAICobranzaService()
+
+# ✅ INSTANCIA GLOBAL CON INICIALIZACIÓN SEGURA
+try:
+    openai_cobranza_service = OpenAICobranzaService()
+    openai_service = openai_cobranza_service  # Alias para compatibilidad
+    print("✅ OpenAI Service inicializado globalmente")
+except Exception as e:
+    print(f"❌ Error inicializando OpenAI Service global: {e}")
+    
+    # ✅ FALLBACK - Crear servicio dummy
+    class DummyOpenAIService:
+        def __init__(self):
+            self.disponible = False
+        
+        def should_use_openai(self, *args, **kwargs):
+            return False
+        
+        def procesar_mensaje_cobranza(self, *args, **kwargs):
+            return {"enhanced": False, "reason": "service_not_available"}
+        
+        def get_stats(self):
+            return {"service": "OpenAI Dummy", "disponible": False}
+        
+        def test_connection(self):
+            return {"success": False, "error": "Service not initialized"}
+    
+    openai_cobranza_service = DummyOpenAIService()
+    openai_service = openai_cobranza_service

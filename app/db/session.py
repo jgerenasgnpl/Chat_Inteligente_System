@@ -1,7 +1,7 @@
-# app/db/session.py - CONEXIÓN CORREGIDA
 import urllib.parse
-from sqlalchemy import create_engine, text  # ✅ Importar text para queries
+from sqlalchemy import create_engine, text 
 from sqlalchemy.orm import sessionmaker
+from app.db.base import Base
 
 # PRIMERO: Base
 from app.db.base import Base
@@ -23,13 +23,13 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# TERCERO: Importar modelos
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.message import Message
 
 # CUARTO: Funciones
 def get_db():
+    """Generador de sesiones de BD"""
     db = SessionLocal()
     try:
         yield db
@@ -37,10 +37,9 @@ def get_db():
         db.close()
 
 def test_connection():
-    """Prueba la conexión - CORREGIDA"""
+    """Prueba la conexión a BD"""
     try:
         with engine.connect() as conn:
-            # ✅ CORRECCIÓN: Usar text() para SQL directo
             result = conn.execute(text("SELECT 1 as test"))
             row = result.fetchone()
             print(f"✅ Conexión exitosa - Test result: {row[0]}")
@@ -50,13 +49,18 @@ def test_connection():
         return False
 
 def create_tables():
-    """Crea las tablas - CORREGIDA"""
+    """Crea las tablas en la BD"""
     try:
+        # ✅ IMPORTAR MODELOS AQUÍ - Después de crear Base
+        from app.models.user import User
+        from app.models.conversation import Conversation  
+        from app.models.message import Message
+        
         Base.metadata.create_all(bind=engine)
         print("✅ Tablas creadas/verificadas")
         return True
     except Exception as e:
-        print(f"❌ Error tablas: {e}")
+        print(f"❌ Error creando tablas: {e}")
         raise
 
 def verify_tables():

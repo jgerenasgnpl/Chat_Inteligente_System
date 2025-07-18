@@ -1,214 +1,394 @@
-from typing import Dict, List, Any, Optional
+import time
+import json
+import logging
+from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-import json
-from datetime import datetime, timedelta
-import logging
+from collections import defaultdict, deque
+import threading
 
-class MonitoringSystem:
-    """
-    Sistema de monitoreo para el chatbot de cobranza
-    """
+logger = logging.getLogger(__name__)
+
+class SystemMonitor:
+    """Monitor en tiempo real del sistema de 3 capas"""
     
-    def __init__(self, db: Session):
-        self.db = db
-        self.logger = logging.getLogger(__name__)
+    def __init__(self):
+        self.metrics = {
+            # Contadores por sistema
+            'rule_hits': 0,
+            'ml_hits': 0,
+            'openai_hits': 0,
+            'cache_hits': 0,
+            'total_requests': 0,
+            'errors': 0,
+            
+            # Tiempos de respuesta
+            'response_times': {
+                'rules': deque(maxlen=100),
+                'ml': deque(maxlen=100),
+                'openai': deque(maxlen=100),
+                'total': deque(maxlen=100)
+            },
+            
+            # Tasas de éxito
+            'success_rates': {
+                'rules': deque(maxlen=100),
+                'ml': deque(maxlen=100),
+                'openai': deque(maxlen=100)
+            },
+            
+            # Cache statistics
+            'cache_stats': {
+                'hits': 0,
+                'misses': 0,
+                'size': 0,
+                'evictions': 0
+            }
+        }
+        
+        # Alertas
+        self.alerts = []
+        self.alert_thresholds = {
+            'avg_response_time': 2000,  # 2s
+            'error_rate': 0.1,          # 10%
+            'ml_confidence_drop': 0.5,   # 50%
+            'cache_hit_rate': 0.3       # 30%
+        }
+        
+        self.lock = threading.Lock()
+        logger.info("✅ SystemMonitor inicializado")
     
-    def registrar_metrica_conversacion(self, conversation_id: int, metrica: str, valor: float):
-        """Registra una métrica de conversación"""
-        try:
-            query = text("""
-                INSERT INTO metricas_conversacion 
-                (conversation_id, metrica, valor, timestamp)
-                VALUES (:conv_id, :metrica, :valor, GETDATE())
-            """)
+    def record_request(self, method: str, response_time_ms: float, 
+                      success: bool, confidence: float = 0.0):
+        """Registrar una request del sistema"""
+        with self.lock:
+            self.metrics['total_requests'] += 1
             
-            self.db.execute(query, {
-                "conv_id": conversation_id,
-                "metrica": metrica,
-                "valor": valor
-            })
-            self.db.commit()
+            # Incrementar contador por método
+            if method == 'REGLA_CRITICA':
+                self.metrics['rule_hits'] += 1
+                self.metrics['response_times']['rules'].append(response_time_ms)
+                self.metrics['success_rates']['rules'].append(1.0 if success else 0.0)
+                
+            elif method == 'ML':
+                self.metrics['ml_hits'] += 1
+                self.metrics['response_times']['ml'].append(response_time_ms)
+                self.metrics['success_rates']['ml'].append(confidence)
+                
+            elif method == 'OPENAI':
+                self.metrics['openai_hits'] += 1
+                self.metrics['response_times']['openai'].append(response_time_ms)
+                self.metrics['success_rates']['openai'].append(confidence)
+                
+            elif method == 'CACHE':
+                self.metrics['cache_hits'] += 1
             
-        except Exception as e:
-            self.logger.error(f"Error registrando métrica: {e}")
+            # Error tracking
+            if not success:
+                self.metrics['errors'] += 1
+            
+            # Tiempo total
+            self.metrics['response_times']['total'].append(response_time_ms)
+            
+            # Verificar alertas
+            self._check_alerts()
     
-    def obtener_metricas_tiempo_real(self) -> Dict:
-        """Obtiene métricas en tiempo real del sistema"""
-        try:
-            # Conversaciones activas
-            conversaciones_activas = text("""
-                SELECT COUNT(*) FROM conversation 
-                WHERE is_active = 1 AND created_at >= DATEADD(hour, -1, GETDATE())
-            """)
+    def record_cache_event(self, event_type: str):
+        """Registrar eventos de cache"""
+        with self.lock:
+            if event_type == 'hit':
+                self.metrics['cache_stats']['hits'] += 1
+            elif event_type == 'miss':
+                self.metrics['cache_stats']['misses'] += 1
+            elif event_type == 'eviction':
+                self.metrics['cache_stats']['evictions'] += 1
+    
+    def update_cache_size(self, size: int):
+        """Actualizar tamaño del cache"""
+        with self.lock:
+            self.metrics['cache_stats']['size'] = size
+    
+    def get_summary(self) -> Dict[str, Any]:
+        """Obtener resumen de métricas"""
+        with self.lock:
+            total = max(self.metrics['total_requests'], 1)
             
-            # Tasa de conversión
-            tasa_conversion = text("""
-                SELECT 
-                    COUNT(CASE WHEN current_state LIKE '%acuerdo%' THEN 1 END) * 100.0 / COUNT(*) as tasa
-                FROM conversation 
-                WHERE created_at >= DATEADD(day, -1, GETDATE())
-            """)
+            # Calcular promedios
+            avg_times = {}
+            for system, times in self.metrics['response_times'].items():
+                avg_times[system] = sum(times) / len(times) if times else 0
             
-            # Intenciones más comunes
-            intenciones_comunes = text("""
-                SELECT TOP 5 
-                    JSON_VALUE(context_data, '$.ultima_intencion') as intencion,
-                    COUNT(*) as cantidad
-                FROM conversation 
-                WHERE context_data IS NOT NULL
-                AND created_at >= DATEADD(day, -1, GETDATE())
-                GROUP BY JSON_VALUE(context_data, '$.ultima_intencion')
-                ORDER BY COUNT(*) DESC
-            """)
+            # Tasas de éxito
+            success_rates = {}
+            for system, rates in self.metrics['success_rates'].items():
+                success_rates[system] = sum(rates) / len(rates) if rates else 0
             
-            activas = self.db.execute(conversaciones_activas).scalar() or 0
-            conversion = self.db.execute(tasa_conversion).scalar() or 0
-            intenciones = self.db.execute(intenciones_comunes).fetchall()
+            # Cache hit rate
+            cache_total = self.metrics['cache_stats']['hits'] + self.metrics['cache_stats']['misses']
+            cache_hit_rate = self.metrics['cache_stats']['hits'] / max(cache_total, 1)
             
             return {
-                "conversaciones_activas": activas,
-                "tasa_conversion_24h": round(conversion, 2),
-                "intenciones_top": [{"intencion": row[0], "cantidad": row[1]} for row in intenciones],
-                "timestamp": datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error obteniendo métricas: {e}")
-            return {"error": str(e)}
-    
-    def detectar_anomalias(self) -> List[Dict]:
-        """Detecta anomalías en el comportamiento del sistema"""
-        anomalias = []
-        
-        try:
-            # Detectar picos de errores
-            errores_recientes = text("""
-                SELECT COUNT(*) FROM message 
-                WHERE text_content LIKE '%error%' 
-                AND timestamp >= DATEADD(hour, -1, GETDATE())
-            """)
-            
-            errores = self.db.execute(errores_recientes).scalar() or 0
-            
-            if errores > 10:  # Threshold configurable
-                anomalias.append({
-                    "tipo": "error_spike",
-                    "severidad": "alta",
-                    "descripcion": f"Pico de errores detectado: {errores} en la última hora",
-                    "timestamp": datetime.now().isoformat()
-                })
-            
-            # Detectar conversaciones estancadas
-            conversaciones_estancadas = text("""
-                SELECT COUNT(*) FROM conversation 
-                WHERE is_active = 1 
-                AND created_at < DATEADD(hour, -2, GETDATE())
-                AND current_state NOT IN ('fin', 'despedida_final')
-            """)
-            
-            estancadas = self.db.execute(conversaciones_estancadas).scalar() or 0
-            
-            if estancadas > 5:
-                anomalias.append({
-                    "tipo": "conversaciones_estancadas",
-                    "severidad": "media",
-                    "descripcion": f"{estancadas} conversaciones estancadas detectadas",
-                    "timestamp": datetime.now().isoformat()
-                })
-            
-        except Exception as e:
-            self.logger.error(f"Error detectando anomalías: {e}")
-        
-        return anomalias
-    
-    def generar_reporte_rendimiento(self, dias: int = 7) -> Dict:
-        """Genera reporte de rendimiento del sistema"""
-        try:
-            fecha_inicio = datetime.now() - timedelta(days=dias)
-            
-            # Métricas de volumen
-            query_volumen = text("""
-                SELECT 
-                    COUNT(DISTINCT conversation_id) as total_conversaciones,
-                    COUNT(*) as total_mensajes,
-                    AVG(CAST(DATEDIFF(minute, c.created_at, COALESCE(c.ended_at, GETDATE())) AS FLOAT)) as duracion_promedio
-                FROM message m
-                JOIN conversation c ON m.conversation_id = c.id
-                WHERE m.timestamp >= :fecha_inicio
-            """)
-            
-            # Métricas de eficiencia
-            query_eficiencia = text("""
-                SELECT 
-                    AVG(CASE WHEN current_state LIKE '%acuerdo%' OR current_state = 'generar_acuerdo' THEN 1.0 ELSE 0.0 END) * 100 as tasa_exito,
-                    AVG(CASE WHEN current_state = 'cerrar_sin_pago' THEN 1.0 ELSE 0.0 END) * 100 as tasa_abandono
-                FROM conversation 
-                WHERE created_at >= :fecha_inicio
-            """)
-            
-            volumen = self.db.execute(query_volumen, {"fecha_inicio": fecha_inicio}).fetchone()
-            eficiencia = self.db.execute(query_eficiencia, {"fecha_inicio": fecha_inicio}).fetchone()
-            
-            return {
-                "periodo": f"Últimos {dias} días",
-                "volumen": {
-                    "conversaciones": volumen[0] if volumen else 0,
-                    "mensajes": volumen[1] if volumen else 0,
-                    "duracion_promedio_min": round(volumen[2], 2) if volumen and volumen[2] else 0
+                'summary': {
+                    'total_requests': total,
+                    'error_rate': self.metrics['errors'] / total,
+                    'avg_response_time_ms': avg_times.get('total', 0),
+                    'cache_hit_rate': cache_hit_rate
                 },
-                "eficiencia": {
-                    "tasa_exito": round(eficiencia[0], 2) if eficiencia and eficiencia[0] else 0,
-                    "tasa_abandono": round(eficiencia[1], 2) if eficiencia and eficiencia[1] else 0
+                'system_usage': {
+                    'rules': f"{(self.metrics['rule_hits'] / total) * 100:.1f}%",
+                    'ml': f"{(self.metrics['ml_hits'] / total) * 100:.1f}%",
+                    'openai': f"{(self.metrics['openai_hits'] / total) * 100:.1f}%",
+                    'cache': f"{(self.metrics['cache_hits'] / total) * 100:.1f}%"
                 },
-                "generado_en": datetime.now().isoformat()
+                'performance': {
+                    'avg_response_times_ms': avg_times,
+                    'success_rates': success_rates
+                },
+                'cache': self.metrics['cache_stats'],
+                'alerts': self.alerts[-10:],  # Últimas 10 alertas
+                'timestamp': datetime.utcnow().isoformat()
             }
-            
-        except Exception as e:
-            self.logger.error(f"Error generando reporte: {e}")
-            return {"error": str(e)}
+    
+    def _check_alerts(self):
+        """Verificar condiciones de alerta"""
+        # Verificar tiempo de respuesta promedio
+        if self.metrics['response_times']['total']:
+            avg_time = sum(self.metrics['response_times']['total']) / len(self.metrics['response_times']['total'])
+            if avg_time > self.alert_thresholds['avg_response_time']:
+                self._add_alert('HIGH_RESPONSE_TIME', f'Tiempo promedio: {avg_time:.1f}ms')
+        
+        # Verificar tasa de error
+        if self.metrics['total_requests'] > 10:
+            error_rate = self.metrics['errors'] / self.metrics['total_requests']
+            if error_rate > self.alert_thresholds['error_rate']:
+                self._add_alert('HIGH_ERROR_RATE', f'Tasa de error: {error_rate:.1%}')
+        
+        # Verificar confianza ML
+        if self.metrics['success_rates']['ml']:
+            avg_confidence = sum(self.metrics['success_rates']['ml']) / len(self.metrics['success_rates']['ml'])
+            if avg_confidence < self.alert_thresholds['ml_confidence_drop']:
+                self._add_alert('LOW_ML_CONFIDENCE', f'Confianza ML: {avg_confidence:.2f}')
+        
+        # Verificar cache hit rate
+        cache_total = self.metrics['cache_stats']['hits'] + self.metrics['cache_stats']['misses']
+        if cache_total > 20:
+            hit_rate = self.metrics['cache_stats']['hits'] / cache_total
+            if hit_rate < self.alert_thresholds['cache_hit_rate']:
+                self._add_alert('LOW_CACHE_HIT_RATE', f'Cache hit rate: {hit_rate:.1%}')
+    
+    def _add_alert(self, alert_type: str, message: str):
+        """Agregar alerta"""
+        alert = {
+            'type': alert_type,
+            'message': message,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        # Evitar alertas duplicadas recientes
+        recent_alerts = [a for a in self.alerts[-5:] if a['type'] == alert_type]
+        if not recent_alerts:
+            self.alerts.append(alert)
+            logger.warning(f"🚨 ALERTA {alert_type}: {message}")
+    
+    def reset_metrics(self):
+        """Reset de métricas (para testing)"""
+        with self.lock:
+            self.__init__()
 
-# Clase para métricas ML
-class MLMetrics:
-    """Métricas específicas para el sistema ML"""
-    
-    def __init__(self, db: Session):
-        self.db = db
-    
-    def registrar_prediccion_ml(self, mensaje: str, intencion_predicha: str, confianza: float, conversation_id: int):
-        """Registra una predicción del modelo ML"""
-        try:
-            query = text("""
-                INSERT INTO predicciones_ml 
-                (conversation_id, mensaje, intencion_predicha, confianza, timestamp)
-                VALUES (:conv_id, :mensaje, :intencion, :confianza, GETDATE())
-            """)
+# ==========================================
+# MONITOR GLOBAL
+# ==========================================
+
+# Instancia global del monitor
+system_monitor = SystemMonitor()
+
+# ==========================================
+# DECORADOR PARA MONITOREO AUTOMÁTICO
+# ==========================================
+
+def monitor_execution(method_name: str = "UNKNOWN"):
+    """Decorador para monitorear automáticamente las funciones"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            success = True
+            confidence = 0.0
             
-            self.db.execute(query, {
-                "conv_id": conversation_id,
-                "mensaje": mensaje[:500],  # Truncar mensaje largo
-                "intencion": intencion_predicha,
-                "confianza": confianza
+            try:
+                result = func(*args, **kwargs)
+                
+                # Extraer confianza si está en el resultado
+                if isinstance(result, dict):
+                    confidence = result.get('confianza', result.get('confidence', 0.0))
+                
+                return result
+                
+            except Exception as e:
+                success = False
+                logger.error(f"❌ Error en {func.__name__}: {e}")
+                raise
+                
+            finally:
+                execution_time = (time.time() - start_time) * 1000
+                system_monitor.record_request(method_name, execution_time, success, confidence)
+        
+        return wrapper
+    return decorator
+
+# ==========================================
+# FUNCIONES DE UTILIDAD PARA BD
+# ==========================================
+
+def save_metrics_to_db(db: Session, metrics: Dict[str, Any]):
+    """Guardar métricas en base de datos"""
+    try:
+        # Guardar en tabla performance_metrics (si existe)
+        query = text("""
+            INSERT INTO performance_metrics (
+                metric_date, total_requests, error_rate, 
+                avg_response_time, cache_hit_rate, 
+                rule_usage, ml_usage, openai_usage,
+                metric_data
+            ) VALUES (
+                GETDATE(), :total_requests, :error_rate,
+                :avg_response_time, :cache_hit_rate,
+                :rule_usage, :ml_usage, :openai_usage,
+                :metric_data
+            )
+        """)
+        
+        summary = metrics['summary']
+        usage = metrics['system_usage']
+        
+        db.execute(query, {
+            'total_requests': summary['total_requests'],
+            'error_rate': summary['error_rate'],
+            'avg_response_time': summary['avg_response_time_ms'],
+            'cache_hit_rate': summary['cache_hit_rate'],
+            'rule_usage': float(usage['rules'].strip('%')),
+            'ml_usage': float(usage['ml'].strip('%')),
+            'openai_usage': float(usage['openai'].strip('%')),
+            'metric_data': json.dumps(metrics)
+        })
+        
+        db.commit()
+        logger.info("✅ Métricas guardadas en BD")
+        
+    except Exception as e:
+        logger.error(f"❌ Error guardando métricas en BD: {e}")
+        db.rollback()
+
+def get_performance_trends(db: Session, days: int = 7) -> Dict[str, Any]:
+    """Obtener tendencias de performance"""
+    try:
+        query = text("""
+            SELECT 
+                CAST(metric_date AS DATE) as date,
+                AVG(avg_response_time) as avg_response_time,
+                AVG(error_rate) as error_rate,
+                AVG(cache_hit_rate) as cache_hit_rate,
+                SUM(total_requests) as total_requests
+            FROM performance_metrics 
+            WHERE metric_date >= DATEADD(DAY, -:days, GETDATE())
+            GROUP BY CAST(metric_date AS DATE)
+            ORDER BY date
+        """)
+        
+        results = []
+        for row in db.execute(query, {'days': days}):
+            results.append({
+                'date': row[0].isoformat(),
+                'avg_response_time': row[1],
+                'error_rate': row[2],
+                'cache_hit_rate': row[3],
+                'total_requests': row[4]
             })
-            self.db.commit()
-            
-        except Exception as e:
-            print(f"Error registrando predicción ML: {e}")
+        
+        return {
+            'trends': results,
+            'period_days': days,
+            'generated_at': datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo tendencias: {e}")
+        return {'trends': [], 'error': str(e)}
+
+# ==========================================
+# HEALTH CHECK
+# ==========================================
+
+def system_health_check(db: Session) -> Dict[str, Any]:
+    """Health check completo del sistema"""
     
-    def obtener_accuracy_ml(self, dias: int = 7) -> float:
-        """Calcula la accuracy del modelo ML basada en feedback"""
-        try:
-            query = text("""
-                SELECT 
-                    AVG(CASE WHEN feedback_correcto = 1 THEN 1.0 ELSE 0.0 END) * 100 as accuracy
-                FROM predicciones_ml 
-                WHERE timestamp >= DATEADD(day, -:dias, GETDATE())
-                AND feedback_correcto IS NOT NULL
-            """)
-            
-            result = self.db.execute(query, {"dias": dias}).scalar()
-            return round(result, 2) if result else 0.0
-            
-        except Exception as e:
-            print(f"Error calculando accuracy ML: {e}")
-            return 0.0
+    health = {
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'components': {},
+        'metrics': system_monitor.get_summary()
+    }
+    
+    try:
+        # Check BD
+        db.execute(text("SELECT 1"))
+        health['components']['database'] = {'status': 'healthy'}
+        
+        # Check tablas críticas
+        tables_to_check = ['conversations', 'Estados_Conversacion', 'datos_entrenamiento']
+        for table in tables_to_check:
+            count = db.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+            health['components'][f'table_{table}'] = {
+                'status': 'healthy',
+                'count': count
+            }
+        
+        # Check modelos ML
+        import os
+        models_dir = "models"
+        if os.path.exists(models_dir):
+            model_files = [f for f in os.listdir(models_dir) if f.endswith('.joblib')]
+            health['components']['ml_models'] = {
+                'status': 'healthy' if model_files else 'warning',
+                'count': len(model_files)
+            }
+        else:
+            health['components']['ml_models'] = {'status': 'error', 'message': 'Models directory not found'}
+        
+        # Check OpenAI
+        from app.core.config import settings
+        if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY.startswith('sk-'):
+            health['components']['openai'] = {'status': 'healthy'}
+        else:
+            health['components']['openai'] = {'status': 'warning', 'message': 'API key not configured'}
+        
+    except Exception as e:
+        health['status'] = 'error'
+        health['error'] = str(e)
+        logger.error(f"❌ Error en health check: {e}")
+    
+    return health
+
+# ==========================================
+# EJEMPLO DE USO EN FLOW MANAGER
+# ==========================================
+
+"""
+# En flow_manager.py, agregar estas líneas:
+
+from app.utils.monitoring import system_monitor, monitor_execution
+
+class OptimizedFlowManager:
+    
+    @monitor_execution("REGLA_CRITICA")
+    def _apply_critical_rules(self, mensaje: str, estado: str, contexto: Dict):
+        # ... código existente ...
+        
+    @monitor_execution("ML")
+    def _classify_with_ml(self, mensaje: str, estado: str, contexto: Dict):
+        # ... código existente ...
+        
+    @monitor_execution("OPENAI")
+    def _classify_with_openai(self, mensaje: str, estado: str, contexto: Dict):
+        # ... código existente ...
+"""

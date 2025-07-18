@@ -1,5 +1,14 @@
+"""
+NLP_SERVICE.PY MEJORADO
+- Mejor confianza en las predicciones
+- Datos de entrenamiento expandidos
+- Validación y mejoras automáticas
+- Compatible con el sistema inteligente
+"""
+
 import re
 import string
+import logging
 from collections import Counter
 from typing import Dict, List, Any, Set
 from sqlalchemy import text
@@ -7,651 +16,681 @@ from sqlalchemy.orm import Session
 import os
 import glob
 from pathlib import Path
+import numpy as np
+from app.services.cache_service import cache_service, cache_result
+
+logger = logging.getLogger(__name__)
 
 def obtener_modelo_mas_reciente():
-    """Obtener el modelo más reciente (incluye los FIXED)"""
+    """Obtener modelo más reciente con búsqueda mejorada"""
+    from pathlib import Path
+    
     models_dir = Path("models")
     
+    print(f"🔍 Buscando modelos en: {models_dir.absolute()}")
+    
     if not models_dir.exists():
-        print("❌ Directorio models no existe")
+        print(f"❌ Directorio models no existe")
+        try:
+            models_dir.mkdir(exist_ok=True)
+            print(f"✅ Directorio models creado")
+        except Exception as e:
+            print(f"❌ Error creando directorio: {e}")
         return None
     
-    # Buscar modelos FIXED primero, luego otros
+    # Buscar modelos
     patterns = [
+        "intention_classifier_IMPROVED_*.joblib",
         "intention_classifier_FIXED_*.joblib",
         "intention_classifier_optimizado_*.joblib", 
-        "intention_classifier_*.joblib"
+        "transformer_classifier_*.joblib",
+        "intention_classifier_*.joblib",
+        "*classifier*.joblib",
+        "*.joblib"
     ]
     
-    for pattern in patterns:
-        files = list(models_dir.glob(pattern))
-        if files:
-            # Ordenar por fecha de modificación (más reciente primero)
-            latest_file = max(files, key=os.path.getmtime)
-            print(f"✅ Usando modelo: {latest_file}")
-            return str(latest_file)
+    print(f"📂 Contenido del directorio models:")
+    try:
+        all_files = list(models_dir.iterdir())
+        for file in all_files:
+            print(f"   - {file.name}")
+        
+        if not all_files:
+            print(f"   (directorio vacío)")
+    except Exception as e:
+        print(f"❌ Error listando directorio: {e}")
     
-    print("❌ No se encontró ningún modelo")
+    # Buscar por patrones
+    for pattern in patterns:
+        try:
+            files = list(models_dir.glob(pattern))
+            print(f"🔍 Patrón '{pattern}': {len(files)} archivos")
+            
+            if files:
+                latest_file = max(files, key=lambda x: x.stat().st_mtime)
+                print(f"✅ Modelo encontrado: {latest_file}")
+                return str(latest_file)
+                
+        except Exception as e:
+            print(f"⚠️ Error con patrón {pattern}: {e}")
+    
+    print(f"❌ No se encontró ningún modelo")
     return None
 
-class SimpleNLPService:
+class ImprovedNLPService:
+    """
+    🧠 SERVICIO NLP MEJORADO
+    - Mejor precisión y confianza
+    - Datos de entrenamiento expandidos
+    - Validación automática
+    - Fallbacks inteligentes
+    """
+    
     def __init__(self):
-        self.default_responses = {
-            "SALUDO": ["¡Hola! ¿En qué puedo ayudarte?"],
-            "DESPEDIDA": ["¡Hasta luego! Que tengas un buen día."],
-            "CONSULTA_DEUDA": ["Te ayudo a consultar tu deuda."],
-            "INTENCION_PAGO": ["Perfecto, te muestro las opciones de pago."],
-            "SOLICITUD_PLAN": ["Te propongo excelentes planes de pago."],
-            "CONFIRMACION": ["Perfecto, procedo con tu solicitud."],
-            "RECHAZO": ["Entiendo, ¿hay algo más en lo que pueda ayudarte?"]
-        }
+        self.model = None
+        self.vectorizer = None
+        self.label_encoder = None
+        self.confidence_threshold = 0.6
         
-        self.stop_words = {
-            'a', 'al', 'algo', 'algunas', 'algunos', 'ante', 'antes', 'como', 'con', 
-            'contra', 'cual', 'cuando', 'de', 'del', 'desde', 'donde', 'durante', 'e',
-            'el', 'ella', 'ellas', 'ellos', 'en', 'entre', 'era', 'eres', 'es', 'esa', 
-            'ese', 'eso', 'esta', 'estas', 'este', 'esto', 'estos', 'ha', 'ha', 'había',
-            'han', 'has', 'hasta', 'he', 'la', 'las', 'le', 'les', 'lo', 'los', 'me', 
-            'mi', 'mis', 'mucho', 'muchos', 'muy', 'ni', 'no', 'nos', 'nosotras', 
-            'nosotros', 'nuestra', 'nuestras', 'nuestro', 'nuestros', 'o', 'otra', 
-            'otras', 'otro', 'otros', 'para', 'pero', 'poco', 'por', 'porque', 'que', 
-            'qué', 'quien', 'quienes', 'se', 'sea', 'si', 'sí', 'sido', 'sin', 'sobre', 
-            'sois', 'somos', 'son', 'soy', 'su', 'sus', 'suyo', 'suyos', 'también', 
-            'tanto', 'te', 'teneis', 'tenemos', 'tener', 'tengo', 'ti', 'tiene', 'tienen',
-            'todo', 'todos', 'tu', 'tus', 'tú', 'un', 'una', 'uno', 'unos', 'vosotras',
-            'vosotros', 'vuestra', 'vuestras', 'vuestro', 'vuestros', 'y', 'ya', 'yo'
-        }
+        # Datos de entrenamiento expandidos y mejorados
+        self.expanded_training_data = self._get_expanded_training_data()
         
-        # Reglas simples de stemming para español (sufijos comunes)
-        self.stemming_rules = [
-            ('ando$', 'ar'), ('iendo$', 'er'), ('iendo$', 'ir'),
-            ('ará$', 'ar'), ('erá$', 'er'), ('irá$', 'ir'),
-            ('aría$', 'ar'), ('ería$', 'er'), ('iría$', 'ir'),
-            ('aba$', 'ar'), ('ía$', 'er'), ('ía$', 'ir'),
-            ('aste$', 'ar'), ('iste$', 'er'), ('iste$', 'ir'),
-            ('aron$', 'ar'), ('ieron$', 'er'), ('ieron$', 'ir'),
-            ('aremos$', 'ar'), ('eremos$', 'er'), ('iremos$', 'ir'),
-            ('adores$', 'ador'), ('adores$', 'ar'),
-            ('mente$', ''), ('ables$', 'able'), ('ibles$', 'ible'),
-            ('idades$', 'idad'), ('ezas$', 'eza'),
-            ('icos$', 'ico'), ('icas$', 'ica'), ('ismos$', 'ismo'),
-            ('ables$', 'ar'), ('ibles$', 'ir'),
-            ('aciones$', 'ar'), ('uciones$', 'uir'),
-            ('logías$', 'logía'),
-            ('os$', 'o'), ('as$', 'a'), ('es$', 'e'),
-            ('s$', '')
-        ]
-        
-        # Patrones regex comunes
+        # Patrones de regex para validación
         self.regex_patterns = {
-            'dinero': r'\b(dinero|plata|pesos|euros|dólares|dolares)\b',
-            'numero': r'\b\d+\b',
-            'porcentaje': r'\b\d+\s*%\b',
-            'cedula': r'\b\d{6,12}\b',
-            'fecha': r'\b\d{1,2}\/\d{1,2}\/\d{2,4}\b'
+            'IDENTIFICACION': [
+                r'\b\d{7,12}\b',
+                r'cedula\s*:?\s*\d{7,12}',
+                r'documento\s*:?\s*\d{7,12}',
+                r'cc\s*:?\s*\d{7,12}'
+            ],
+            'CONFIRMACION': [
+                r'\b(si|sí|acepto|ok|está bien|de acuerdo|confirmo|dale|bueno)\b',
+                r'\b(acepta|acept|confirm)\w*\b'
+            ],
+            'RECHAZO': [
+                r'\b(no|nop|negativo|imposible|no puedo|no me interesa)\b',
+                r'\b(rechaz|neg)\w*\b'
+            ],
+            'INTENCION_PAGO': [
+                r'\b(quiero|necesito|deseo)\s+(pagar|cancelar|liquidar)\b',
+                r'\b(pagar|cancelar|liquidar|abonar)\b'
+            ],
+            'SOLICITUD_PLAN': [
+                r'\b(opciones|planes|facilidades|descuento|rebaja)\b',
+                r'\b(plan\s+de\s+pago|cuotas|facilidad)\b'
+            ]
         }
         
-        # Cache para intenciones y patrones
-        self.intenciones_cache = {}
-        self.patrones_cache = {}
-        self.sinonimos_cache = {}
-        self.cache_actualizado = False
-        
-        # Definición de patrones por defecto (si no se puede acceder a la BD)
-        self._definir_patrones_por_defecto()
-        
+        # Cargar o entrenar modelo
         self._load_model()
+    
+    def _get_expanded_training_data(self):
+        """Datos de entrenamiento expandidos para mejor precisión"""
+        return [
+            # ===== IDENTIFICACION =====
+            ("12345678", "IDENTIFICACION"),
+            ("93388915", "IDENTIFICACION"),
+            ("1020428633", "IDENTIFICACION"),
+            ("mi cedula es 12345678", "IDENTIFICACION"),
+            ("documento 93388915", "IDENTIFICACION"),
+            ("cc 1020428633", "IDENTIFICACION"),
+            ("cedula: 12345678", "IDENTIFICACION"),
+            ("mi documento es 93388915", "IDENTIFICACION"),
+            ("soy el 12345678", "IDENTIFICACION"),
+            ("tengo la cedula 93388915", "IDENTIFICACION"),
+            
+            # ===== SOLICITUD_PLAN =====
+            ("quiero opciones", "SOLICITUD_PLAN"),
+            ("necesito plan", "SOLICITUD_PLAN"),
+            ("facilidades", "SOLICITUD_PLAN"),
+            ("opciones de pago", "SOLICITUD_PLAN"),
+            ("plan de pagos", "SOLICITUD_PLAN"),
+            ("cuotas", "SOLICITUD_PLAN"),
+            ("descuento", "SOLICITUD_PLAN"),
+            ("rebaja", "SOLICITUD_PLAN"),
+            ("que opciones tengo", "SOLICITUD_PLAN"),
+            ("como puedo pagar", "SOLICITUD_PLAN"),
+            ("planes de cuotas", "SOLICITUD_PLAN"),
+            ("facilidades de pago", "SOLICITUD_PLAN"),
+            ("ver opciones", "SOLICITUD_PLAN"),
+            ("mostrar planes", "SOLICITUD_PLAN"),
+            ("quiero ver las opciones", "SOLICITUD_PLAN"),
+            ("que facilidades hay", "SOLICITUD_PLAN"),
+            ("hay descuentos", "SOLICITUD_PLAN"),
+            ("puedo pagar en cuotas", "SOLICITUD_PLAN"),
+            
+            # ===== CONFIRMACION =====
+            ("si", "CONFIRMACION"),
+            ("sí", "CONFIRMACION"),
+            ("acepto", "CONFIRMACION"),
+            ("está bien", "CONFIRMACION"),
+            ("de acuerdo", "CONFIRMACION"),
+            ("confirmo", "CONFIRMACION"),
+            ("ok", "CONFIRMACION"),
+            ("bueno", "CONFIRMACION"),
+            ("dale", "CONFIRMACION"),
+            ("perfecto", "CONFIRMACION"),
+            ("excelente", "CONFIRMACION"),
+            ("si acepto", "CONFIRMACION"),
+            ("si quiero", "CONFIRMACION"),
+            ("si me interesa", "CONFIRMACION"),
+            ("si está bien", "CONFIRMACION"),
+            ("me parece bien", "CONFIRMACION"),
+            ("estoy de acuerdo", "CONFIRMACION"),
+            
+            # ===== INTENCION_PAGO =====
+            ("quiero pagar", "INTENCION_PAGO"),
+            ("necesito pagar", "INTENCION_PAGO"),
+            ("como pagar", "INTENCION_PAGO"),
+            ("pagar deuda", "INTENCION_PAGO"),
+            ("realizar pago", "INTENCION_PAGO"),
+            ("cancelar deuda", "INTENCION_PAGO"),
+            ("liquidar", "INTENCION_PAGO"),
+            ("abonar", "INTENCION_PAGO"),
+            ("consignar", "INTENCION_PAGO"),
+            ("pagar mi cuenta", "INTENCION_PAGO"),
+            ("quiero cancelar", "INTENCION_PAGO"),
+            ("voy a pagar", "INTENCION_PAGO"),
+            ("necesito cancelar mi deuda", "INTENCION_PAGO"),
+            
+            # ===== CONSULTA_DEUDA =====
+            ("cuanto debo", "CONSULTA_DEUDA"),
+            ("mi saldo", "CONSULTA_DEUDA"),
+            ("información", "CONSULTA_DEUDA"),
+            ("cual es mi deuda", "CONSULTA_DEUDA"),
+            ("saldo pendiente", "CONSULTA_DEUDA"),
+            ("valor de mi deuda", "CONSULTA_DEUDA"),
+            ("cuanto tengo pendiente", "CONSULTA_DEUDA"),
+            ("mi cuenta", "CONSULTA_DEUDA"),
+            ("estado de cuenta", "CONSULTA_DEUDA"),
+            ("consultar saldo", "CONSULTA_DEUDA"),
+            ("ver mi deuda", "CONSULTA_DEUDA"),
+            ("información de mi cuenta", "CONSULTA_DEUDA"),
+            
+            # ===== RECHAZO =====
+            ("no puedo", "RECHAZO"),
+            ("no me interesa", "RECHAZO"),
+            ("imposible", "RECHAZO"),
+            ("no tengo dinero", "RECHAZO"),
+            ("no", "RECHAZO"),
+            ("nop", "RECHAZO"),
+            ("negativo", "RECHAZO"),
+            ("no acepto", "RECHAZO"),
+            ("no quiero", "RECHAZO"),
+            ("muy caro", "RECHAZO"),
+            ("no me sirve", "RECHAZO"),
+            ("no me conviene", "RECHAZO"),
+            ("rechazo", "RECHAZO"),
+            ("no gracias", "RECHAZO"),
+            
+            # ===== SALUDO =====
+            ("hola", "SALUDO"),
+            ("buenos días", "SALUDO"),
+            ("buenas", "SALUDO"),
+            ("buenas tardes", "SALUDO"),
+            ("buenas noches", "SALUDO"),
+            ("hi", "SALUDO"),
+            ("que tal", "SALUDO"),
+            ("como estas", "SALUDO"),
+            ("buen día", "SALUDO"),
+            ("saludos", "SALUDO"),
+            
+            # ===== DESPEDIDA =====
+            ("gracias", "DESPEDIDA"),
+            ("hasta luego", "DESPEDIDA"),
+            ("adios", "DESPEDIDA"),
+            ("chao", "DESPEDIDA"),
+            ("bye", "DESPEDIDA"),
+            ("muchas gracias", "DESPEDIDA"),
+            ("que tengas buen día", "DESPEDIDA"),
+            ("nos vemos", "DESPEDIDA"),
+            ("hasta pronto", "DESPEDIDA"),
+            
+            # ===== CASOS MIXTOS Y COMPLEJOS =====
+            ("hola quiero pagar", "INTENCION_PAGO"),
+            ("buenos días, cuanto debo", "CONSULTA_DEUDA"),
+            ("si quiero ver las opciones", "SOLICITUD_PLAN"),
+            ("no puedo pagar todo", "RECHAZO"),
+            ("acepto el plan de cuotas", "CONFIRMACION"),
+            ("mi cedula es 12345 y quiero pagar", "IDENTIFICACION"),
+            ("opciones para pagar por cuotas", "SOLICITUD_PLAN"),
+            ("está muy caro, hay descuento", "SOLICITUD_PLAN"),
+            ("confirmo la primera opción", "CONFIRMACION"),
+        ]
+    
     def _load_model(self):
-        """Cargar modelo ML automáticamente"""
+        """Cargar modelo con entrenamiento mejorado si es necesario"""
         try:
             from joblib import load
-            
-            # Buscar modelo más reciente
             model_path = obtener_modelo_mas_reciente()
             
             if model_path and os.path.exists(model_path):
-                self.model = load(model_path)
-                print(f"✅ Modelo ML cargado: {model_path}")
-            else:
-                print("⚠️ No se encontró modelo ML, usando clasificación por reglas")
-                self.model = None
+                try:
+                    saved_data = load(model_path)
+                    
+                    # Verificar estructura del modelo guardado
+                    if isinstance(saved_data, dict):
+                        self.model = saved_data.get('model')
+                        self.vectorizer = saved_data.get('vectorizer')
+                        self.label_encoder = saved_data.get('label_encoder')
+                    else:
+                        self.model = saved_data
+                    
+                    # Test del modelo
+                    if hasattr(self.model, 'predict') and self.vectorizer:
+                        test_result = self._test_model_safely()
+                        if test_result:
+                            print(f"✅ Modelo ML cargado y validado: {model_path}")
+                            return
+                    
+                    print(f"⚠️ Modelo cargado pero falló validación")
+                    self.model = None
+                    
+                except Exception as load_error:
+                    print(f"❌ Error cargando modelo {model_path}: {load_error}")
+                    self.model = None
+            
+            # Entrenar modelo mejorado si no se pudo cargar
+            print("🔄 Entrenando modelo mejorado...")
+            self._train_improved_model()
                 
         except Exception as e:
-            print(f"❌ Error cargando modelo ML: {e}")
+            print(f"❌ Error general en carga ML: {e}")
             self.model = None
-
-    def predict(self, text: str) -> dict:
-        """Predecir intención del texto"""
+    
+    def _test_model_safely(self):
+        """Test seguro del modelo cargado"""
         try:
-            if self.model is None:
-                # Clasificación por reglas si no hay modelo
-                return self._rule_based_classification(text)
+            test_texts = ["quiero pagar", "12345678", "si acepto"]
             
-            # Usar modelo ML
-            text_clean = self._clean_text(text)
+            if self.vectorizer:
+                features = self.vectorizer.transform(test_texts)
+                predictions = self.model.predict(features)
+                probabilities = self.model.predict_proba(features)
+                
+                return len(predictions) == len(test_texts) and len(probabilities) == len(test_texts)
+            else:
+                # Para modelos que no usan vectorizer separado
+                predictions = self.model.predict(test_texts)
+                return len(predictions) == len(test_texts)
+                
+        except Exception as e:
+            print(f"⚠️ Error en test del modelo: {e}")
+            return False
+    
+    def _train_improved_model(self):
+        """Entrenar modelo mejorado con datos expandidos"""
+        try:
+            print("🔄 Entrenando modelo NLP mejorado...")
+            
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.naive_bayes import MultinomialNB
+            from sklearn.preprocessing import LabelEncoder
+            from sklearn.pipeline import Pipeline
+            from sklearn.model_selection import cross_val_score
+            import joblib
+            from pathlib import Path
+            from datetime import datetime
+            
+            # Preparar datos
+            texts = [item[0] for item in self.expanded_training_data]
+            labels = [item[1] for item in self.expanded_training_data]
+            
+            print(f"📊 Entrenando con {len(texts)} ejemplos")
+            print(f"📊 Intenciones: {set(labels)}")
+            
+            # Crear vectorizador mejorado
+            self.vectorizer = TfidfVectorizer(
+                max_features=500,
+                ngram_range=(1, 3),  # Incluir trigramas
+                lowercase=True,
+                stop_words=None,
+                min_df=1,
+                max_df=0.95,
+                analyzer='word',
+                token_pattern=r'\b\w+\b'
+            )
+            
+            # Crear codificador de etiquetas
+            self.label_encoder = LabelEncoder()
+            encoded_labels = self.label_encoder.fit_transform(labels)
+            
+            # Vectorizar textos
+            X = self.vectorizer.fit_transform(texts)
+            
+            # Entrenar clasificador mejorado
+            self.model = MultinomialNB(alpha=0.5)  # Suavizado reducido para mejor precisión
+            self.model.fit(X, encoded_labels)
+            
+            # Validación cruzada
+            scores = cross_val_score(self.model, X, encoded_labels, cv=3, scoring='accuracy')
+            print(f"📊 Precisión promedio: {scores.mean():.3f} (+/- {scores.std() * 2:.3f})")
+            
+            # Test con casos específicos
+            self._test_trained_model()
+            
+            # Guardar modelo mejorado
+            self._save_improved_model()
+            
+            print("✅ Modelo mejorado entrenado correctamente")
+            
+        except Exception as e:
+            print(f"❌ Error entrenando modelo: {e}")
+            import traceback
+            traceback.print_exc()
+            self.model = None
+    
+    def _test_trained_model(self):
+        """Test del modelo recién entrenado"""
+        test_cases = [
+            ("quiero opciones", "SOLICITUD_PLAN"),
+            ("12345678", "IDENTIFICACION"),
+            ("si acepto", "CONFIRMACION"),
+            ("cuanto debo", "CONSULTA_DEUDA"),
+            ("no puedo", "RECHAZO"),
+            ("hola", "SALUDO"),
+            ("quiero pagar", "INTENCION_PAGO")
+        ]
+        
+        print("🧪 Testing modelo entrenado:")
+        correct_predictions = 0
+        
+        for test_text, expected in test_cases:
+            result = self.predict(test_text)
+            prediction = result.get('intention', 'DESCONOCIDA')
+            confidence = result.get('confidence', 0.0)
+            
+            is_correct = prediction == expected
+            if is_correct:
+                correct_predictions += 1
+            
+            status = "✅" if is_correct else "❌"
+            print(f"   {status} '{test_text}' → {prediction} ({confidence:.3f}) [esperado: {expected}]")
+        
+        accuracy = correct_predictions / len(test_cases)
+        print(f"📊 Precisión en test: {accuracy:.3f} ({correct_predictions}/{len(test_cases)})")
+        
+        return accuracy >= 0.7
+    
+    def _save_improved_model(self):
+        """Guardar modelo mejorado"""
+        try:
+            from pathlib import Path
+            import joblib
+            from datetime import datetime
+            
+            models_dir = Path("models")
+            models_dir.mkdir(exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            model_path = models_dir / f"intention_classifier_IMPROVED_{timestamp}.joblib"
+            
+            # Guardar todo junto
+            model_data = {
+                'model': self.model,
+                'vectorizer': self.vectorizer,
+                'label_encoder': self.label_encoder,
+                'training_data_size': len(self.expanded_training_data),
+                'created_at': datetime.now().isoformat(),
+                'version': 'improved_v2'
+            }
+            
+            joblib.dump(model_data, model_path)
+            print(f"💾 Modelo mejorado guardado en: {model_path}")
+            
+        except Exception as e:
+            print(f"❌ Error guardando modelo: {e}")
+    
+    def predict(self, text: str) -> dict:
+        """Predicción mejorada con validaciones múltiples"""
+        try:
+            if not text or len(text.strip()) == 0:
+                return {"intention": "DESCONOCIDA", "confidence": 0.0}
+            
+            # 1. VALIDACIÓN CON REGEX (ALTA CONFIANZA)
+            regex_result = self._validate_with_regex(text)
+            if regex_result['confidence'] >= 0.9:
+                return regex_result
+            
+            # 2. PREDICCIÓN CON ML
+            if self.model and self.vectorizer:
+                ml_result = self._predict_with_ml(text)
+                
+                # Combinar con validación regex si hay coincidencia parcial
+                if regex_result['confidence'] > 0.0 and ml_result['confidence'] > 0.6:
+                    # Si regex y ML coinciden, aumentar confianza
+                    if regex_result['intention'] == ml_result['intention']:
+                        ml_result['confidence'] = min(ml_result['confidence'] + 0.2, 1.0)
+                
+                return ml_result
+            
+            # 3. FALLBACK CON REGLAS
+            return self._fallback_classification(text)
+            
+        except Exception as e:
+            print(f"❌ Error en predicción: {e}")
+            return {"intention": "DESCONOCIDA", "confidence": 0.0}
+    
+    def _validate_with_regex(self, text: str) -> dict:
+        """Validación con patrones regex"""
+        text_lower = text.lower().strip()
+        
+        for intention, patterns in self.regex_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, text_lower):
+                    # Calcular confianza basada en la especificidad del patrón
+                    confidence = 0.95 if len(pattern) > 20 else 0.85
+                    
+                    return {
+                        "intention": intention,
+                        "confidence": confidence,
+                        "method": "regex_validation"
+                    }
+        
+        return {"intention": "DESCONOCIDA", "confidence": 0.0}
+    
+    def _predict_with_ml(self, text: str) -> dict:
+        """Predicción con modelo ML"""
+        try:
+            # Limpiar texto
+            text_clean = self._clean_text_for_ml(text)
             
             if not text_clean:
                 return {"intention": "DESCONOCIDA", "confidence": 0.0}
             
+            # Vectorizar
+            features = self.vectorizer.transform([text_clean])
+            
             # Predecir
-            prediction = self.model.predict([text_clean])[0]
-            probabilities = self.model.predict_proba([text_clean])[0]
+            prediction_encoded = self.model.predict(features)[0]
+            probabilities = self.model.predict_proba(features)[0]
+            
+            # Decodificar
+            prediction = self.label_encoder.inverse_transform([prediction_encoded])[0]
             confidence = max(probabilities)
             
-            print(f"🤖 ML procesó '{text}' → {prediction} (confianza: {confidence:.2f})")
+            # Ajustar confianza basada en características del texto
+            adjusted_confidence = self._adjust_confidence(text, prediction, confidence)
             
             return {
                 "intention": prediction,
-                "confidence": float(confidence)
+                "confidence": float(adjusted_confidence),
+                "method": "ml_prediction"
             }
             
         except Exception as e:
-            print(f"❌ Error en predicción ML: {e}")
-            return self._rule_based_classification(text)
+            print(f"❌ Error en ML prediction: {e}")
+            return {"intention": "DESCONOCIDA", "confidence": 0.0}
     
-    def _clean_text(self, text: str) -> str:
-        """Limpiar texto para ML (igual que en entrenamiento)"""
+    def _clean_text_for_ml(self, text: str) -> str:
+        """Limpiar texto para ML optimizado"""
         if not text:
             return ""
         
         import re
-        import string
         
+        # Convertir a minúsculas
         text = str(text).lower().strip()
-        text = re.sub(r'[^\w\s\d]', ' ', text)
         
-        # Stopwords mínimas
-        stopwords = {'el', 'la', 'de', 'que', 'y', 'a', 'en', 'un', 'se', 'del', 'los', 'las'}
-        palabras = [w for w in text.split() if w not in stopwords and len(w) > 1]
+        # Preservar números importantes (cédulas)
+        text = re.sub(r'\b(\d{7,12})\b', r'NUMERO_DOCUMENTO', text)
         
-        return " ".join(palabras)
+        # Limpiar caracteres especiales pero preservar espacios
+        text = re.sub(r'[^\w\s]', ' ', text)
+        
+        # Normalizar espacios
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
     
-    def _rule_based_classification(self, text: str) -> dict:
-        """Clasificación por reglas como backup"""
+    def _adjust_confidence(self, original_text: str, prediction: str, confidence: float) -> float:
+        """Ajustar confianza basada en características del texto"""
+        
+        # Ajustes por longitud del texto
+        text_length = len(original_text.strip())
+        if text_length < 3:
+            confidence *= 0.7  # Reducir confianza para textos muy cortos
+        elif text_length > 50:
+            confidence *= 1.1  # Aumentar ligeramente para textos más descriptivos
+        
+        # Ajustes por tipo de predicción
+        if prediction == 'IDENTIFICACION':
+            # Para identificación, verificar que realmente hay un número
+            if re.search(r'\b\d{7,12}\b', original_text):
+                confidence = min(confidence * 1.2, 1.0)
+            else:
+                confidence *= 0.5
+        
+        elif prediction == 'CONFIRMACION':
+            # Para confirmaciones, verificar palabras clave específicas
+            confirmacion_keywords = ['si', 'sí', 'acepto', 'ok', 'confirmo']
+            if any(keyword in original_text.lower() for keyword in confirmacion_keywords):
+                confidence = min(confidence * 1.15, 1.0)
+        
+        elif prediction == 'SOLICITUD_PLAN':
+            # Para solicitudes de plan, verificar contexto
+            plan_keywords = ['opciones', 'planes', 'cuotas', 'facilidades']
+            if any(keyword in original_text.lower() for keyword in plan_keywords):
+                confidence = min(confidence * 1.1, 1.0)
+        
+        return min(confidence, 1.0)
+    
+    def _fallback_classification(self, text: str) -> dict:
+        """Clasificación de fallback con reglas simples"""
         text_lower = text.lower()
         
-        # Reglas específicas para casos críticos
-        if any(word in text_lower for word in ["solicitar descuento", "descuento", "rebaja", "promoción"]):
-            return {"intention": "SOLICITUD_PLAN", "confidence": 0.9}
-        
-        if any(word in text_lower for word in ["ver opciones", "opciones de pago", "formas de pago"]):
-            return {"intention": "INTENCION_PAGO", "confidence": 0.9}
-        
+        # Reglas básicas de fallback
         if re.search(r'\b\d{7,12}\b', text):
-            return {"intention": "IDENTIFICACION", "confidence": 0.95}
+            return {"intention": "IDENTIFICACION", "confidence": 0.8}
         
-        if any(word in text_lower for word in ["hola", "buenos días", "buenas tardes"]):
-            return {"intention": "SALUDO", "confidence": 0.9}
+        if any(word in text_lower for word in ['si', 'sí', 'acepto', 'ok']):
+            return {"intention": "CONFIRMACION", "confidence": 0.7}
         
-        if any(word in text_lower for word in ["sí", "si", "acepto", "confirmo", "ok"]):
-            return {"intention": "CONFIRMACION", "confidence": 0.9}
+        if any(word in text_lower for word in ['no', 'imposible', 'no puedo']):
+            return {"intention": "RECHAZO", "confidence": 0.7}
         
-        if any(word in text_lower for word in ["no", "no puedo", "no me interesa"]):
-            return {"intention": "RECHAZO", "confidence": 0.9}
+        if any(word in text_lower for word in ['opciones', 'planes', 'cuotas']):
+            return {"intention": "SOLICITUD_PLAN", "confidence": 0.6}
         
-        if any(word in text_lower for word in ["cuanto debo", "mi deuda", "saldo"]):
-            return {"intention": "CONSULTA_DEUDA", "confidence": 0.9}
+        if any(word in text_lower for word in ['pagar', 'cancelar', 'liquidar']):
+            return {"intention": "INTENCION_PAGO", "confidence": 0.6}
         
-        if any(word in text_lower for word in ["quiero pagar", "realizar pago", "pagar"]):
-            return {"intention": "INTENCION_PAGO", "confidence": 0.9}
+        if any(word in text_lower for word in ['cuanto', 'debo', 'saldo']):
+            return {"intention": "CONSULTA_DEUDA", "confidence": 0.6}
+        
+        if any(word in text_lower for word in ['hola', 'buenas', 'buenos']):
+            return {"intention": "SALUDO", "confidence": 0.7}
         
         return {"intention": "DESCONOCIDA", "confidence": 0.0}
     
-    def _definir_patrones_por_defecto(self):
-        """Define patrones por defecto para usar si no hay acceso a la BD"""
-        self.default_intenciones = {
-            1: {'nombre': 'consulta_deuda', 'estado_siguiente': 'informar_deuda'},
-            2: {'nombre': 'pago', 'estado_siguiente': 'proponer_planes_pago'},
-            3: {'nombre': 'acuerdo', 'estado_siguiente': 'proponer_planes_pago'},
-            4: {'nombre': 'rechazo', 'estado_siguiente': 'gestionar_objecion'},
-            5: {'nombre': 'identificacion', 'estado_siguiente': 'validar_documento'}
-        }
-        
-        self.default_patrones = {
-            1: [  # consulta_deuda
-                {'patron': 'cuanto debo', 'tipo': 'contiene'},
-                {'patron': 'cuánto debo', 'tipo': 'contiene'},
-                {'patron': 'deuda', 'tipo': 'contiene'},
-                {'patron': 'saldo', 'tipo': 'contiene'},
-                {'patron': 'pendiente', 'tipo': 'contiene'},
-                {'patron': 'valor', 'tipo': 'contiene'},
-                {'patron': 'debo', 'tipo': 'contiene'},
-                {'patron': 'total', 'tipo': 'contiene'}
-            ],
-            2: [  # pago
-                {'patron': 'pagar', 'tipo': 'contiene'},
-                {'patron': 'abonar', 'tipo': 'contiene'},
-                {'patron': 'transferir', 'tipo': 'contiene'},
-                {'patron': 'consignar', 'tipo': 'contiene'},
-                {'patron': 'cancelar', 'tipo': 'contiene'},
-                {'patron': 'liquidar', 'tipo': 'contiene'}
-            ],
-            3: [  # acuerdo
-                {'patron': 'acuerdo', 'tipo': 'contiene'},
-                {'patron': 'plan', 'tipo': 'contiene'},
-                {'patron': 'cuota', 'tipo': 'contiene'},
-                {'patron': 'facilidad', 'tipo': 'contiene'},
-                {'patron': 'descuento', 'tipo': 'contiene'},
-                {'patron': 'negociar', 'tipo': 'contiene'},
-                {'patron': 'propuesta', 'tipo': 'contiene'}
-            ],
-            4: [  # rechazo
-                {'patron': 'no voy a pagar', 'tipo': 'contiene'},
-                {'patron': 'imposible', 'tipo': 'contiene'},
-                {'patron': 'no puedo', 'tipo': 'contiene'},
-                {'patron': 'no tengo', 'tipo': 'contiene'},
-                {'patron': 'no reconozco', 'tipo': 'contiene'}
-            ],
-            5: [  # identificacion 
-                {'patron': 'cedula', 'tipo': 'contiene'},
-                {'patron': 'cédula', 'tipo': 'contiene'},
-                {'patron': 'documento', 'tipo': 'contiene'},
-                {'patron': 'identificacion', 'tipo': 'contiene'},
-                {'patron': 'identificación', 'tipo': 'contiene'}
-            ]
-        }
-        
-        self.default_sinonimos = {
-            'deuda': ['obligacion', 'obligación', 'pendiente', 'saldo'],
-            'pagar': ['cancelar', 'abonar', 'consignar', 'liquidar'],
-            'acuerdo': ['plan', 'convenio', 'arreglo', 'negociacion', 'negociación'],
-            'descuento': ['rebaja', 'reducción', 'reduccion', 'quita', 'condonación', 'condonacion'],
-            'dinero': ['plata', 'efectivo', 'recursos', 'fondos']
-        }
-    
-    def _tokenizar(self, texto: str) -> List[str]:
-        """Tokeniza un texto en palabras sin usar NLTK"""
-        # Convertir a minúsculas
-        texto = texto.lower()
-        
-        # Eliminar puntuación
-        for p in string.punctuation:
-            texto = texto.replace(p, ' ')
-        
-        # Dividir en tokens
-        tokens = texto.split()
-        
-        # Eliminar tokens vacíos
-        return [t for t in tokens if t]
-    
-    def _eliminar_stopwords(self, tokens: List[str]) -> List[str]:
-        """Elimina palabras comunes (stopwords)"""
-        return [t for t in tokens if t not in self.stop_words]
-    
-    def _aplicar_stemming(self, palabra: str) -> str:
-        """Aplica reglas de stemming simples para español"""
-        palabra_original = palabra
-        
-        # Aplicar reglas de stemming
-        for sufijo, reemplazo in self.stemming_rules:
-            if re.search(sufijo, palabra):
-                palabra = re.sub(sufijo, reemplazo, palabra)
-                break
-        
-        # Si la palabra es muy corta, mantener la original
-        if len(palabra) < 3:
-            return palabra_original
-        
-        return palabra
-    
-    def _limpiar_texto(self, texto: str) -> str:
-        """Limpia el texto: tokeniza, elimina stopwords y aplica stemming"""
-        if not texto:
-            return ""
-            
-        # Tokenizar
-        tokens = self._tokenizar(texto)
-        
-        # Eliminar stopwords
-        tokens = self._eliminar_stopwords(tokens)
-        
-        # Aplicar stemming
-        tokens = [self._aplicar_stemming(token) for token in tokens]
-        
-        return ' '.join(tokens)
-    
-    def _actualizar_cache_desde_bd(self, db: Session):
-        """Actualiza la caché desde la base de datos"""
-        try:
-            # Verificar si existen las tablas
-            verifica_tablas = text("""
-                SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES 
-                WHERE TABLE_NAME IN ('Intenciones', 'Patrones_Intencion', 'Sinonimos')
-            """)
-            tablas_count = db.execute(verifica_tablas).scalar()
-            
-            if tablas_count < 3:
-                print("ADVERTENCIA: Tablas NLP no existen - usando configuración por defecto")
-                self._crear_tablas_nlp(db)
-                return False
-            
-            # Cargar intenciones
-            query_intenciones = text("SELECT id, nombre, estado_siguiente FROM Intenciones")
-            for row in db.execute(query_intenciones):
-                self.intenciones_cache[row[0]] = {
-                    'nombre': row[1],
-                    'estado_siguiente': row[2]
-                }
-            
-            # Cargar patrones
-            query_patrones = text("SELECT intencion_id, patron, tipo FROM Patrones_Intencion")
-            for row in db.execute(query_patrones):
-                intencion_id = row[0]
-                if intencion_id not in self.patrones_cache:
-                    self.patrones_cache[intencion_id] = []
-                
-                self.patrones_cache[intencion_id].append({
-                    'patron': row[1].lower(),
-                    'patron_limpio': self._limpiar_texto(row[1]),
-                    'tipo': row[2]
-                })
-            
-            # Cargar sinónimos
-            query_sinonimos = text("SELECT palabra, sinonimo FROM Sinonimos")
-            for row in db.execute(query_sinonimos):
-                palabra = row[0].lower()
-                if palabra not in self.sinonimos_cache:
-                    self.sinonimos_cache[palabra] = []
-                self.sinonimos_cache[palabra].append(row[1].lower())
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error al actualizar cache desde BD: {e}")
-            return False
-    
-    def _crear_tablas_nlp(self, db: Session):
-        """Crea las tablas en la base de datos si no existen"""
-        try:
-            # Crear tablas
-            crear_tabla_intenciones = text("""
-                IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Intenciones')
-                BEGIN
-                    CREATE TABLE Intenciones (
-                        id INT IDENTITY(1,1) PRIMARY KEY,
-                        nombre VARCHAR(50) NOT NULL,
-                        descripcion VARCHAR(255),
-                        estado_siguiente VARCHAR(50),
-                        prioridad INT DEFAULT 1
-                    )
-                END
-            """)
-            
-            crear_tabla_patrones = text("""
-                IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Patrones_Intencion')
-                BEGIN
-                    CREATE TABLE Patrones_Intencion (
-                        id INT IDENTITY(1,1) PRIMARY KEY,
-                        intencion_id INT,
-                        patron VARCHAR(100) NOT NULL,
-                        tipo VARCHAR(20) DEFAULT 'exacto'
-                    )
-                END
-            """)
-            
-            crear_tabla_sinonimos = text("""
-                IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Sinonimos')
-                BEGIN
-                    CREATE TABLE Sinonimos (
-                        id INT IDENTITY(1,1) PRIMARY KEY,
-                        palabra VARCHAR(50) NOT NULL,
-                        sinonimo VARCHAR(50) NOT NULL
-                    )
-                END
-            """)
-            
-            db.execute(crear_tabla_intenciones)
-            db.execute(crear_tabla_patrones)
-            db.execute(crear_tabla_sinonimos)
-            db.commit()
-            
-            # Insertar datos por defecto
-            self._cargar_datos_predeterminados(db)
-            
-        except Exception as e:
-            print(f"Error al crear tablas NLP: {e}")
-            db.rollback()
-    
-    def _cargar_datos_predeterminados(self, db: Session):
-        """Carga datos predefinidos en la base de datos"""
-        try:
-            # Cargar intenciones
-            for intent_id, intent_data in self.default_intenciones.items():
-                insert = text("""
-                    IF NOT EXISTS (SELECT 1 FROM Intenciones WHERE nombre = :nombre)
-                    BEGIN
-                        INSERT INTO Intenciones (nombre, estado_siguiente)
-                        VALUES (:nombre, :estado)
-                    END
-                """)
-                db.execute(insert, {
-                    "nombre": intent_data['nombre'],
-                    "estado": intent_data['estado_siguiente']
-                })
-            
-            # Obtener IDs reales
-            id_map = {}
-            id_query = text("SELECT id, nombre FROM Intenciones")
-            for row in db.execute(id_query):
-                id_map[row[1]] = row[0]
-            
-            # Cargar patrones
-            for default_id, patrones in self.default_patrones.items():
-                intencion_nombre = self.default_intenciones[default_id]['nombre']
-                intencion_id = id_map.get(intencion_nombre)
-                
-                if intencion_id:
-                    for p in patrones:
-                        insert = text("""
-                            IF NOT EXISTS (SELECT 1 FROM Patrones_Intencion 
-                                          WHERE intencion_id = :intencion_id AND patron = :patron)
-                            BEGIN
-                                INSERT INTO Patrones_Intencion (intencion_id, patron, tipo)
-                                VALUES (:intencion_id, :patron, :tipo)
-                            END
-                        """)
-                        db.execute(insert, {
-                            "intencion_id": intencion_id, 
-                            "patron": p['patron'],
-                            "tipo": p['tipo']
-                        })
-            
-            # Cargar sinónimos
-            for palabra, sinonimos in self.default_sinonimos.items():
-                for sinonimo in sinonimos:
-                    insert = text("""
-                        IF NOT EXISTS (SELECT 1 FROM Sinonimos 
-                                      WHERE palabra = :palabra AND sinonimo = :sinonimo)
-                        BEGIN
-                            INSERT INTO Sinonimos (palabra, sinonimo)
-                            VALUES (:palabra, :sinonimo)
-                        END
-                    """)
-                    db.execute(insert, {"palabra": palabra, "sinonimo": sinonimo})
-            
-            db.commit()
-            print("Datos predeterminados cargados correctamente")
-            
-        except Exception as e:
-            print(f"Error al cargar datos predeterminados: {e}")
-            db.rollback()
-    
     def actualizar_cache(self, db: Session):
-        """Actualiza la caché de intenciones, patrones y sinónimos"""
-        # Intentar cargar desde la base de datos
-        if self._actualizar_cache_desde_bd(db):
-            self.cache_actualizado = True
-            print(f"Cache actualizado desde BD: {len(self.intenciones_cache)} intenciones")
-        else:
-            # Si falla, usar la configuración por defecto
-            self.intenciones_cache = self.default_intenciones
-            self.patrones_cache = self.default_patrones
-            self.sinonimos_cache = self.default_sinonimos
-            self.cache_actualizado = True
-            print("Cache actualizado con configuración por defecto")
+        """Actualizar cache (compatibilidad)"""
+        print("✅ NLP Service mejorado - Cache actualizado")
+        return True
     
-    def expandir_texto_con_sinonimos(self, texto: str) -> str:
-        """Expande el texto con sinónimos conocidos"""
-        if not texto:
-            return ""
-            
-        palabras = texto.lower().split()
-        texto_expandido = texto.lower()
-        
-        # Buscar sinónimos para cada palabra
-        for palabra in palabras:
-            if palabra in self.sinonimos_cache:
-                for sinonimo in self.sinonimos_cache[palabra]:
-                    if sinonimo not in texto_expandido:
-                        texto_expandido += f" {sinonimo}"
-        
-        return texto_expandido
-    
-    def detectar_documento_identidad(self, texto: str) -> str:
-        """Intenta extraer un número de documento del texto"""
-        # Patrones comunes para documentos
-        patrones = [
-            r'\b\d{6,12}\b',            # Números de 6 a 12 dígitos
-            r'cédula\s+(\d{6,12})',      # "cédula" seguido de números
-            r'cedula\s+(\d{6,12})',      # "cedula" sin tilde
-            r'cc\s+(\d{6,12})',          # "cc" seguido de números
-            r'documento\s+(\d{6,12})'    # "documento" seguido de números
-        ]
-        
-        texto = texto.lower()
-        for patron in patrones:
-            match = re.search(patron, texto)
-            if match:
-                # Si hay grupos capturados, devolver el primer grupo
-                if match.groups():
-                    return match.group(1)
-                # Si no hay grupos, devolver la coincidencia completa
-                return match.group(0)
-        
-        return None
-    
-    def detectar_intencion(self, db: Session, mensaje: str) -> dict:
-        """
-        Detecta la intención del usuario en el mensaje utilizando
-        técnicas simples de procesamiento de texto.
-        """
-        # Actualizar caché si es necesario
-        if not self.cache_actualizado:
-            self.actualizar_cache(db)
-        
-        if not mensaje:
-            return {
-                "intencion": "desconocida", 
-                "confianza": 0, 
-                "estado_siguiente": None
-            }
-        
-        # Preprocesamiento del mensaje
-        mensaje_original = mensaje.lower()
-        mensaje_expandido = self.expandir_texto_con_sinonimos(mensaje_original)
-        mensaje_limpio = self._limpiar_texto(mensaje_expandido)
-        
-        print(f"Mensaje original: '{mensaje_original}'")
-        print(f"Mensaje expandido: '{mensaje_expandido}'")
-        print(f"Mensaje limpio: '{mensaje_limpio}'")
-        
-        # Detectar documento de identidad
-        documento = self.detectar_documento_identidad(mensaje_original)
-        if documento:
-            print(f"Documento detectado: {documento}")
-        
-        # Lista para almacenar coincidencias
-        coincidencias = []
-        
-        # 1. Verificar coincidencias por contención
-        for intencion_id, patrones in self.patrones_cache.items():
-            for patron_info in patrones:
-                patron = patron_info['patron']
-                patron_limpio = patron_info.get('patron_limpio', self._limpiar_texto(patron))
-                
-                # Verificar si el patrón está contenido en el mensaje original
-                if patron in mensaje_original:
-                    coincidencias.append({
-                        'intencion_id': intencion_id,
-                        'confianza': 0.9,
-                        'patron': patron
-                    })
-                # Verificar con el mensaje limpio
-                elif patron_limpio and patron_limpio in mensaje_limpio:
-                    coincidencias.append({
-                        'intencion_id': intencion_id,
-                        'confianza': 0.8,
-                        'patron': patron
-                    })
-        
-        # 2. Si se detectó un documento, dar prioridad a la intención de identificación
-        if documento:
-            for intencion_id, info in self.intenciones_cache.items():
-                if info['nombre'] == 'identificacion':
-                    coincidencias.append({
-                        'intencion_id': intencion_id,
-                        'confianza': 0.95,
-                        'patron': 'documento_detectado'
-                    })
-                    break
-        
-        # 3. Si no hay coincidencias claras, contar ocurrencias de palabras clave
-        if not coincidencias:
-            palabras_mensaje = set(mensaje_limpio.split())
-            
-            for intencion_id, patrones in self.patrones_cache.items():
-                contador = 0
-                patrones_palabras = set()
-                
-                # Recopilar todas las palabras de los patrones de esta intención
-                for patron_info in patrones:
-                    patron = patron_info.get('patron_limpio', self._limpiar_texto(patron_info['patron']))
-                    for palabra in patron.split():
-                        if len(palabra) > 2:  # Solo palabras significativas
-                            patrones_palabras.add(palabra)
-                
-                # Contar cuántas palabras del mensaje coinciden con palabras de patrones
-                for palabra in palabras_mensaje:
-                    if palabra in patrones_palabras:
-                        contador += 1
-                
-                # Si hay coincidencias, añadir a la lista
-                if contador > 0 and len(patrones_palabras) > 0:
-                    ratio = contador / len(patrones_palabras)
-                    if ratio > 0.2:  # Umbral mínimo
-                        confianza = 0.5 + (0.3 * ratio)
-                        coincidencias.append({
-                            'intencion_id': intencion_id,
-                            'confianza': confianza,
-                            'patron': f"{contador} palabras clave"
-                        })
-        
-        # Si no hay coincidencias, devolver desconocida
-        if not coincidencias:
-            return {
-                "intencion": "desconocida", 
-                "confianza": 0, 
-                "estado_siguiente": None
-            }
-        
-        # Imprimir coincidencias para debugging
-        print("Coincidencias encontradas:")
-        for c in coincidencias:
-            intent_info = self.intenciones_cache.get(c['intencion_id'], {'nombre': 'desconocida'})
-            print(f"  - {intent_info['nombre']}: {c['confianza']:.2f} ({c['patron']})")
-        
-        # Obtener la mejor coincidencia
-        mejor_coincidencia = max(coincidencias, key=lambda x: x['confianza'])
-        intencion_id = mejor_coincidencia['intencion_id']
-        intencion_info = self.intenciones_cache.get(intencion_id, {'nombre': 'desconocida', 'estado_siguiente': None})
-        
+    def get_model_info(self) -> dict:
+        """Obtener información del modelo"""
         return {
-            "intencion": intencion_info['nombre'],
-            "confianza": mejor_coincidencia['confianza'],
-            "estado_siguiente": intencion_info['estado_siguiente'],
-            "patron_detectado": mejor_coincidencia['patron'],
-            "documento_detectado": documento
+            "model_loaded": self.model is not None,
+            "vectorizer_loaded": self.vectorizer is not None,
+            "training_data_size": len(self.expanded_training_data),
+            "confidence_threshold": self.confidence_threshold,
+            "intentions_supported": list(set([item[1] for item in self.expanded_training_data])),
+            "regex_patterns_count": sum(len(patterns) for patterns in self.regex_patterns.values()),
+            "version": "improved_v2"
         }
 
-# Instancia global del servicio
-nlp_service = SimpleNLPService()
+# Instancia global mejorada
+nlp_service = ImprovedNLPService()
+
+class ImprovedNLPServiceWithCache(ImprovedNLPService):
+    """NLP Service con Redis Cache"""
+    
+    def __init__(self):
+        super().__init__()
+        self.cache = cache_service
+    
+    def predict(self, text: str) -> dict:
+        """Predicción con cache"""
+        
+        if not text or len(text.strip()) == 0:
+            return {"intention": "DESCONOCIDA", "confidence": 0.0}
+        
+        # 1. Verificar cache de predicciones ML
+        cached_prediction = self.cache.get_cached_ml_prediction(text)
+        if cached_prediction:
+            logger.debug(f"🎯 ML Cache HIT: {text[:20]}...")
+            return cached_prediction
+        
+        # 2. Ejecutar predicción normal
+        logger.debug(f"💾 ML Cache MISS: {text[:20]}... - ejecutando ML")
+        result = super().predict(text)
+        
+        # 3. Guardar en cache si la confianza es suficiente
+        if result.get('confidence', 0) >= 0.6:
+            self.cache.cache_ml_prediction(text, result, ttl=1800)  # 30 minutos
+            logger.debug(f"💾 ML prediction guardada en cache")
+        
+        return result
+    
+# Test automático al importar
+def test_nlp_service_automatically():
+    """Test automático del servicio"""
+    test_cases = [
+        ("12345678", "IDENTIFICACION"),
+        ("quiero opciones", "SOLICITUD_PLAN"),
+        ("si acepto", "CONFIRMACION"),
+        ("no puedo", "RECHAZO"),
+        ("cuanto debo", "CONSULTA_DEUDA"),
+        ("quiero pagar", "INTENCION_PAGO")
+    ]
+    
+    print("🧪 Test automático NLP Service:")
+    passed = 0
+    
+    for text, expected in test_cases:
+        result = nlp_service.predict(text)
+        prediction = result.get('intention')
+        confidence = result.get('confidence', 0)
+        
+        is_correct = prediction == expected and confidence >= 0.6
+        if is_correct:
+            passed += 1
+        
+        status = "✅" if is_correct else "❌"
+        print(f"   {status} '{text}' → {prediction} ({confidence:.2f})")
+    
+    print(f"📊 Test resultado: {passed}/{len(test_cases)} casos correctos")
+    
+    if passed >= len(test_cases) * 0.8:
+        print("🎉 NLP Service funcionando correctamente")
+    else:
+        print("⚠️ NLP Service necesita mejoras")
+
+# Ejecutar test automático
+if __name__ == "__main__":
+    test_nlp_service_automatically()
+    print(f"\n📋 Información del modelo:")
+    info = nlp_service.get_model_info()
+    for key, value in info.items():
+        print(f"   {key}: {value}")

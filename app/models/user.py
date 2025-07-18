@@ -1,5 +1,4 @@
-# app/models/users.py - GENERADO AUTOMÁTICAMENTE
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
@@ -14,7 +13,12 @@ class User(Base):
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime)
     
-    conversations = relationship("Conversation", back_populates="user")
+    conversations = relationship(
+        "Conversation", 
+        back_populates="user",
+        lazy="select",
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self):
         id_field = getattr(self, 'id', 'N/A')

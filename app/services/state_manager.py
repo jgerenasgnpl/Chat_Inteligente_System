@@ -65,7 +65,7 @@ class StateManager:
         db: Session, 
         conversation_id: int, 
         new_state: str,
-        context_data: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None
     ) -> Conversation:
         """
         ✅ VERSIÓN CORREGIDA - Actualiza estado y contexto con persistencia garantizada
@@ -83,18 +83,18 @@ class StateManager:
             print(f"🔄 Estado actualizado: {new_state}")
             
             # 2. Manejar contexto de forma simple
-            if context_data:
+            if context:
                 try:
-                    context_json = json.dumps(context_data, ensure_ascii=False, default=str)
+                    context_json = json.dumps(context, ensure_ascii=False, default=str)
                     
                     # Usar métodos del objeto si existen
-                    if hasattr(conversation, 'context_data'):
-                        conversation.context_data = context_json
+                    if hasattr(conversation, 'context'):
+                        conversation.context = context_json
                     
                     if hasattr(conversation, 'context'):
                         conversation.context = context_json
                     
-                    print(f"💾 Contexto guardado: {len(context_data)} elementos")
+                    print(f"💾 Contexto guardado: {len(context)} elementos")
                     
                 except Exception as e:
                     print(f"❌ Error guardando contexto: {e}")
@@ -121,13 +121,13 @@ class StateManager:
             )
         
     @staticmethod
-    def _backup_context_to_database_CORREGIDO(db: Session, conversation_id: int, context_data: Dict[str, Any]):
+    def _backup_context_to_database_CORREGIDO(db: Session, conversation_id: int, context: Dict[str, Any]):
         """✅ CORREGIDO - Sin usar tablas que no existen"""
         try:
             # ✅ MÉTODO SIMPLIFICADO: Solo usar tabla conversations existente
             from sqlalchemy import text
             
-            context_json = json.dumps(context_data, ensure_ascii=False, default=str)
+            context_json = json.dumps(context, ensure_ascii=False, default=str)
             
             # Actualizar en conversations (tabla que SÍ existe)
             update_query = text("""
@@ -222,18 +222,18 @@ class StateManager:
             )
     
     @staticmethod
-    def safe_get_context_data(conversation: Conversation) -> Dict[str, Any]:
+    def safe_get_context(conversation: Conversation) -> Dict[str, Any]:
         """
-        ✅ VERSIÓN MEJORADA - Obtiene context_data como diccionario de forma segura
+        ✅ VERSIÓN MEJORADA - Obtiene context como diccionario de forma segura
         """
         try:
-            # 1. Verificar context_data (campo principal)
-            if hasattr(conversation, 'context_data') and conversation.context_data:
-                if isinstance(conversation.context_data, dict):
-                    return conversation.context_data
-                elif isinstance(conversation.context_data, str) and conversation.context_data.strip():
+            # 1. Verificar context (campo principal)
+            if hasattr(conversation, 'context') and conversation.context:
+                if isinstance(conversation.context, dict):
+                    return conversation.context
+                elif isinstance(conversation.context, str) and conversation.context.strip():
                     try:
-                        parsed = json.loads(conversation.context_data)
+                        parsed = json.loads(conversation.context)
                         if isinstance(parsed, dict):
                             return parsed
                     except json.JSONDecodeError:
