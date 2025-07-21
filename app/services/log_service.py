@@ -3,6 +3,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException, status
 from typing import Optional, List
 from datetime import datetime
+from typing import Dict, Any
 import json
 
 from app.models.message import Message
@@ -212,3 +213,46 @@ class LogService:
         except Exception as e:
             print(f"❌ Error registrando timeout event: {e}")
             return False
+    
+    @staticmethod
+    def log_message_safe(
+        db: Session,
+        conversation_id: int,
+        sender_type: str, 
+        text_content: str,
+        button_selected: Optional[str] = None,
+        previous_state: Optional[str] = None,
+        next_state: Optional[str] = None,
+        metadata_dict: Optional[Dict[str, Any]] = None 
+    ) -> Message:
+        """
+        ✅ VERSIÓN SEGURA - Maneja automáticamente la serialización de metadata
+        """
+        metadata_json = None
+        if metadata_dict:
+            try:
+                from app.api.endpoints.chat import clean_data_for_json, safe_json_dumps
+            except ImportError:
+                def clean_data_for_json(data):
+                    return data
+                def safe_json_dumps(data):
+                    import json
+                    return json.dumps(data, ensure_ascii=False)
+            try:
+                metadata_limpio = clean_data_for_json(metadata_dict)
+                metadata_json = safe_json_dumps(metadata_limpio)
+            except Exception as e:
+                print(f"⚠️ Error serializando metadata: {e}")
+                metadata_json = None
+        
+        # ✅ USAR MÉTODO ORIGINAL CON METADATA YA SERIALIZADA
+        return LogService.log_message(
+            db=db,
+            conversation_id=conversation_id,
+            sender_type=sender_type,
+            text_content=text_content,
+            button_selected=button_selected,
+            previous_state=previous_state,
+            next_state=next_state,
+            metadata=metadata_json
+        )

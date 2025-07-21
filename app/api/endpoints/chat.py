@@ -1422,18 +1422,20 @@ def _validar_estado_existente(estado: str) -> str:
 
 def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_usuario: str, 
                              resultado: Dict[str, Any], button_selected: Optional[str]):
-    """Log completo y estructurado de la interacción"""
+    """✅ VERSIÓN CORREGIDA - Log completo con serialización segura"""
     try:
-        LogService.log_message(
+        LogService.log_message_safe(
             db=db,
             conversation_id=conversation.id,
-            sender_type="user",
-            text_content=mensaje_usuario,
-            button_selected=button_selected,
-            previous_state=conversation.current_state
+            sender_type="system",
+            text_content=resultado['mensaje_respuesta'],
+            previous_state=conversation.current_state,
+            next_state=resultado['next_state'],
+            metadata_dict=metadata_raw  # ✅ PASAR DICT, NO STRING
         )
         
-        metadata = {
+        # ✅ LIMPIAR METADATA ANTES DE SERIALIZAR
+        metadata_raw = {
             "intencion_detectada": resultado.get('intencion'),
             "metodo_procesamiento": resultado.get('metodo'),
             "confianza": resultado.get('confianza'),
@@ -1441,8 +1443,15 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
             "motor_ml_integrado": True,
             "deteccion_automatica_cedulas": True,
             "procesamiento_dinamico": True,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "transition_info": resultado.get('transition_info', {})  # Esto puede contener Decimal
         }
+        
+        # ✅ USAR FUNCIÓN DE LIMPIEZA PARA METADATA
+        metadata_limpio = clean_data_for_json(metadata_raw)
+        
+        # ✅ USAR ENCODER PERSONALIZADO
+        metadata_json = safe_json_dumps(metadata_limpio)
         
         LogService.log_message(
             db=db,
@@ -1451,11 +1460,23 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
             text_content=resultado['mensaje_respuesta'],
             previous_state=conversation.current_state,
             next_state=resultado['next_state'],
-            metadata=json.dumps(metadata)
+            metadata=metadata_json  # ✅ AHORA USA SERIALIZACIÓN SEGURA
         )
         
     except Exception as e:
-        print(f"⚠️ Error en logging: {e}")
+        print(f"⚠️ Error en logging (no crítico): {e}")
+        # ✅ LOGGING SIMPLIFICADO SIN METADATA COMO FALLBACK
+        try:
+            LogService.log_message(
+                db=db,
+                conversation_id=conversation.id,
+                sender_type="system",
+                text_content=resultado['mensaje_respuesta'],
+                previous_state=conversation.current_state,
+                next_state=resultado['next_state']
+            )
+        except:
+            pass  # No es crítico si falla el logging
 
 def _build_client_context(self, cliente_info: Dict[str, Any], cedula: str) -> Dict[str, Any]:
     """✅ CORREGIDO - Construir contexto del cliente de forma estructurada con datos reales"""

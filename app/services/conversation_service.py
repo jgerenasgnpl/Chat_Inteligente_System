@@ -1016,26 +1016,41 @@ class ConversationServiceWithCache(ConversationService):
         return context
     
     def _update_context_simple(self, conversation: Conversation, updates: Dict):
-        """Actualizar contexto e invalidar cache"""
-        
-        # 1. Actualizar en BD (método original)
-        super()._update_context_simple(conversation, updates)
-        
-        # 2. Invalidar cache del contexto
-        self.cache.invalidate_conversation_cache(conversation.id)
-        logger.debug(f"🗑️ Cache invalidado para conversation {conversation.id}")
-        
-        # 3. Guardar nuevo contexto en cache
+        """✅ CORREGIDO - Preservar datos del cliente con serialización segura"""
         try:
             current_context = {}
             if hasattr(conversation, 'context_data') and conversation.context_data:
-                current_context = json.loads(conversation.context_data)
+                try:
+                    current_context = json.loads(conversation.context_data)
+                except:
+                    pass
             
-            current_context.update(updates)
-            self.cache.cache_conversation_context(conversation.id, current_context, ttl=3600)
+            # ✅ PRESERVAR DATOS CRÍTICOS DEL CLIENTE
+            client_data_keys = [
+                'cliente_encontrado', 'Nombre_del_cliente', 'saldo_total',
+                'banco', 'oferta_1', 'oferta_2', 'hasta_3_cuotas', 
+                'hasta_6_cuotas', 'hasta_12_cuotas', 'cedula_detectada'
+            ]
+            
+            # Solo actualizar si no sobrescribe datos del cliente
+            for key, value in updates.items():
+                if key in client_data_keys:
+                    # Si ya hay datos del cliente, no sobrescribir con valores por defecto
+                    if current_context.get(key) and value == 0:
+                        print(f"⚠️ Preservando {key} del cliente: {current_context[key]}")
+                        continue
+                current_context[key] = value
+            
+            # ✅ USAR SERIALIZACIÓN SEGURA
+            from app.api.endpoints.chat import limpiar_contexto_para_bd, safe_json_dumps
+            contexto_limpio = limpiar_contexto_para_bd(current_context)
+            context_json = safe_json_dumps(contexto_limpio)
+            conversation.context_data = context_json
+            
+            print(f"💾 Contexto actualizado preservando datos del cliente")
             
         except Exception as e:
-            logger.warning(f"⚠️ Error actualizando cache de contexto: {e}")
+            logger.error(f"❌ Error actualizando contexto: {e}")
 
 def crear_conversation_service(db: Session) -> ConversationService:
     """Factory para crear instancia del servicio dinámico"""
