@@ -100,95 +100,130 @@ class VariableService:
             return None
 
     def _combinar_datos_contexto_y_sistema_FIXED(self, contexto: Dict[str, Any]) -> Dict[str, Any]:
-        """✅ VERSIÓN CORREGIDA - Prioridad absoluta a datos del cliente"""
+        """✅ VERSIÓN CORREGIDA - Prioridad ABSOLUTA a datos del cliente"""
         try:
             print(f"🔧 [COMBINAR] Iniciando combinación de datos...")
-            print(f"🔧 [COMBINAR] Contexto recibido: {len(contexto)} elementos")
             
-            # 1. Variables del sistema (valores por defecto)
-            variables_sistema = self._cargar_variables_sistema()
-            
-            # 2. ✅ VERIFICAR DATOS VÁLIDOS DEL CLIENTE
-            tiene_cliente = (
-                contexto.get("Nombre_del_cliente") or 
-                contexto.get("nombre_cliente") or
-                contexto.get("cedula_detectada")
+            # 1. Verificar si hay datos REALES del cliente
+            tiene_cliente = bool(
+                contexto.get("cliente_encontrado") and 
+                contexto.get("saldo_total", 0) > 0 and
+                contexto.get("Nombre_del_cliente")
             )
             
+            print(f"🔧 [COMBINAR] Cliente encontrado resultado: {tiene_cliente}")
+            
             if tiene_cliente:
-                print(f"✅ [COMBINAR] CLIENTE DETECTADO - Procesando datos reales")
+                print(f"✅ [COMBINAR] USANDO DATOS REALES DEL CLIENTE")
                 
-                # Extraer datos del cliente
-                nombre = (contexto.get("Nombre_del_cliente") or 
-                        contexto.get("nombre_cliente", "Cliente"))
+                # ✅ USAR SOLO DATOS REALES - NO MEZCLAR CON SISTEMA
+                datos_finales = contexto.copy()  # ✅ PRIORIDAD ABSOLUTA AL CONTEXTO
                 
-                # ✅ DATOS DEL CLIENTE CON CONVERSIONES CORRECTAS
-                datos_cliente = {
-                    "nombre_cliente": nombre,
-                    "Nombre_del_cliente": nombre,
-                    "cliente_nombre": nombre,  # Alias adicional
+                # Solo agregar valores por defecto para campos vacíos
+                if not datos_finales.get("banco"):
+                    datos_finales["banco"] = "Entidad Financiera"
                     
-                    # ✅ SALDO COMO ENTERO
-                    "saldo_total": self._convertir_a_entero(contexto.get("saldo_total", 0)),
-                    
-                    # ✅ OFERTAS COMO ENTEROS - NOMBRES EXACTOS DE LA BD
-                    "oferta_1": self._convertir_a_entero(contexto.get("Oferta_1") or contexto.get("oferta_1", 0)),
-                    "oferta_2": self._convertir_a_entero(contexto.get("Oferta_2") or contexto.get("oferta_2", 0)),
-                    "Oferta_1": self._convertir_a_entero(contexto.get("Oferta_1") or contexto.get("oferta_1", 0)),
-                    "Oferta_2": self._convertir_a_entero(contexto.get("Oferta_2") or contexto.get("oferta_2", 0)),
-                    "oferta_3": self._convertir_a_entero(contexto.get("Oferta_3") or contexto.get("oferta_3", 0)),
-                    "oferta_4": self._convertir_a_entero(contexto.get("Oferta_4") or contexto.get("oferta_4", 0)),
-                    
-                    # ✅ CUOTAS COMO ENTEROS
-                    "hasta_3_cuotas": self._convertir_a_entero(contexto.get("Hasta_3_cuotas") or contexto.get("hasta_3_cuotas", 0)),
-                    "hasta_6_cuotas": self._convertir_a_entero(contexto.get("Hasta_6_cuotas") or contexto.get("hasta_6_cuotas", 0)),
-                    "hasta_12_cuotas": self._convertir_a_entero(contexto.get("Hasta_12_cuotas") or contexto.get("hasta_12_cuotas", 0)),
-                    "hasta_18_cuotas": self._convertir_a_entero(contexto.get("Hasta_18_cuotas") or contexto.get("hasta_18_cuotas", 0)),
-                    
-                    # Otros datos importantes
-                    "pago_flexible": self._convertir_a_entero(contexto.get("Pago_flexible") or contexto.get("pago_flexible", 0)),
-                    "banco": contexto.get("banco", "Entidad Financiera"),
-                    "cedula": contexto.get("cedula_detectada") or contexto.get("Cedula") or contexto.get("cedula", ""),
-                    "cedula_detectada": contexto.get("cedula_detectada") or contexto.get("Cedula") or contexto.get("cedula", ""),
-                    "producto": contexto.get("Producto", "Producto"),
-                    "telefono": contexto.get("Telefono", ""),
-                    "email": contexto.get("Email", ""),
-                    "capital": self._convertir_a_entero(contexto.get("Capital", 0)),
-                    "intereses": self._convertir_a_entero(contexto.get("Intereses", 0))
+                return datos_finales
+            else:
+                print(f"⚠️ [COMBINAR] Sin datos reales - usando sistema por defecto")
+                variables_sistema = self._cargar_variables_sistema()
+                return {**variables_sistema, **contexto}
+                
+        except Exception as e:
+            print(f"❌ [COMBINAR] Error: {e}")
+            return contexto
+    
+    def _consulta_directa_bd(self, cedula: str) -> Optional[Dict[str, Any]]:
+        """✅ NUEVO - Consulta directa a BD cuando faltan datos"""
+        try:
+            if not cedula:
+                return None
+                
+            print(f"🔍 [CONSULTA_DIRECTA] Consultando BD para cédula: {cedula}")
+            
+            query = text("""
+                SELECT TOP 1 
+                    Nombre_del_cliente, Saldo_total, 
+                    Oferta_1, Oferta_2,
+                    Hasta_3_cuotas, Hasta_6_cuotas, Hasta_12_cuotas,
+                    banco
+                FROM ConsolidadoCampañasNatalia 
+                WHERE CAST(Cedula AS VARCHAR) = :cedula
+                ORDER BY Saldo_total DESC
+            """)
+            
+            result = self.db.execute(query, {"cedula": str(cedula)}).fetchone()
+            
+            if result:
+                datos = {
+                    "nombre": result[0] or "Cliente",
+                    "saldo": int(float(result[1])) if result[1] else 0,
+                    "oferta_1": int(float(result[2])) if result[2] else 0,
+                    "oferta_2": int(float(result[3])) if result[3] else 0,
+                    "cuotas_3": int(float(result[4])) if result[4] else 0,
+                    "cuotas_6": int(float(result[5])) if result[5] else 0,
+                    "cuotas_12": int(float(result[6])) if result[6] else 0,
+                    "banco": result[7] or "Entidad Financiera"
                 }
                 
-                # ✅ LOG DETALLADO
-                print(f"✅ [COMBINAR] DATOS REALES DEL CLIENTE:")
-                print(f"   Nombre: {datos_cliente['nombre_cliente']}")
-                print(f"   Saldo: ${datos_cliente['saldo_total']:,}")
-                print(f"   Oferta_2: ${datos_cliente['oferta_2']:,}")
-                print(f"   Banco: {datos_cliente['banco']}")
+                print(f"✅ [CONSULTA_DIRECTA] Datos obtenidos de BD:")
+                print(f"   Nombre: {datos['nombre']}")
+                print(f"   Saldo: ${datos['saldo']:,}")
+                print(f"   Oferta_2: ${datos['oferta_2']:,}")
                 
-                # ✅ COMBINACIÓN CON MÁXIMA PRIORIDAD AL CLIENTE
-                datos_finales = {}
-                datos_finales.update(variables_sistema)     # 1. Base del sistema
-                datos_finales.update(contexto)              # 2. Contexto general  
-                datos_finales.update(datos_cliente)         # 3. ✅ DATOS DEL CLIENTE (MÁXIMA PRIORIDAD)
-                
-                print(f"🎯 [COMBINAR] USANDO DATOS REALES - CLIENTE: {datos_finales.get('nombre_cliente')}")
-                
-            else:
-                print(f"⚠️ [COMBINAR] Sin datos de cliente - usando sistema por defecto")
-                datos_finales = {**variables_sistema, **contexto}
+                return datos
             
-            print(f"🔧 [COMBINAR] Datos finales: {len(datos_finales)} variables disponibles")
-            
-            return datos_finales
+            print(f"❌ [CONSULTA_DIRECTA] No se encontraron datos para cédula: {cedula}")
+            return None
             
         except Exception as e:
-            logger.error(f"❌ [COMBINAR] Error combinando datos: {e}")
-            return {**self._cargar_variables_sistema(), **contexto}
-    
+            print(f"❌ [CONSULTA_DIRECTA] Error: {e}")
+            return None
+
+    def _extraer_cedula_contexto(self, contexto: Dict[str, Any]) -> Optional[str]:
+        """✅ MEJORADO - Extraer cédula del contexto con múltiples fuentes"""
+        try:
+            # ✅ BUSCAR EN MÚLTIPLES CAMPOS
+            campos_cedula = [
+                "cedula_detectada", "cedula", "documento", 
+                "Cedula", "CEDULA", "cedula_cliente", "user_cedula",
+                "numero_documento", "doc", "identification"
+            ]
+            
+            for campo in campos_cedula:
+                valor = contexto.get(campo)
+                if valor and len(str(valor)) >= 7:
+                    cedula_str = str(valor).strip()
+                    if cedula_str.isdigit() and 7 <= len(cedula_str) <= 12:
+                        print(f"✅ [EXTRAER_CEDULA] Cédula encontrada en campo '{campo}': {cedula_str}")
+                        return cedula_str
+            
+            # ✅ BUSCAR EN VALORES ANIDADOS
+            for key, value in contexto.items():
+                if isinstance(value, (str, int)) and len(str(value)) >= 7:
+                    valor_str = str(value).strip()
+                    if valor_str.isdigit() and 7 <= len(valor_str) <= 12:
+                        print(f"✅ [EXTRAER_CEDULA] Cédula encontrada en valor '{key}': {valor_str}")
+                        return valor_str
+            
+            print(f"❌ [EXTRAER_CEDULA] No se encontró cédula en contexto")
+            print(f"❌ [EXTRAER_CEDULA] Campos disponibles: {list(contexto.keys())}")
+            return None
+            
+        except Exception as e:
+            print(f"⚠️ [EXTRAER_CEDULA] Error extrayendo cédula: {e}")
+            return None
+
     def _convertir_a_entero(self, valor):
-        """Convierte valor a entero manejando diferentes formatos"""
+        """✅ MEJORADO - Convierte valor a entero manejando Decimal y otros tipos"""
         try:
             if valor is None or valor == "":
                 return 0
+            
+            # ✅ MANEJAR TIPO DECIMAL ESPECÍFICAMENTE
+            from decimal import Decimal
+            if isinstance(valor, Decimal):
+                return int(valor)
             
             # Si ya es entero
             if isinstance(valor, int):
@@ -208,8 +243,14 @@ class VariableService:
             if isinstance(valor, float):
                 return int(valor)
                 
-            return 0
-        except (ValueError, TypeError):
+            # ✅ CUALQUIER OTRO TIPO NUMÉRICO
+            try:
+                return int(float(str(valor)))
+            except:
+                return 0
+                
+        except (ValueError, TypeError) as e:
+            print(f"⚠️ Error convirtiendo '{valor}' a entero: {e}")
             return 0
         
     def _obtener_oferta_directa_bd(self, cedula: str) -> Optional[int]:

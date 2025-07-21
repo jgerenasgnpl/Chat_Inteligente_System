@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from fastapi import status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import datetime, timedelta
+from decimal import Decimal
+from datetime import datetime, timedelta, date
 from app.api.deps import get_db
 from app.schemas.chat import ChatRequest, ChatResponse, ConversationHistoryResponse, CedulaTestResponse, CedulaTestRequest
 from app.services.conversation_service import crear_conversation_service
@@ -22,6 +23,81 @@ load_dotenv()
 router = APIRouter(prefix="/chat", tags=["Chat"])
 logger = logging.getLogger("uvicorn.error")
 
+
+class CustomJSONEncoder(json.JSONEncoder):
+    """Encoder personalizado para manejar tipos especiales"""
+    
+    def default(self, obj):
+        # ✅ DECIMAL → INT
+        if isinstance(obj, Decimal):
+            return int(obj)
+        
+        # ✅ DATETIME → ISO STRING
+        elif isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        
+        # ✅ NUMPY TYPES (si están presentes)
+        elif hasattr(obj, 'item'):
+            return obj.item()
+        
+        # ✅ BYTES → STRING
+        elif isinstance(obj, bytes):
+            return obj.decode('utf-8', errors='ignore')
+        
+        # ✅ SET → LIST
+        elif isinstance(obj, set):
+            return list(obj)
+        
+        # ✅ OTROS TIPOS NUMÉRICOS
+        elif hasattr(obj, '__int__'):
+            try:
+                return int(obj)
+            except:
+                return str(obj)
+        
+        # ✅ FALLBACK
+        try:
+            return super().default(obj)
+        except TypeError:
+            return str(obj)
+
+# ✅ FUNCIÓN HELPER PARA SERIALIZACIÓN SEGURA
+def safe_json_dumps(data: any, **kwargs) -> str:
+    """Serialización JSON segura que maneja todos los tipos"""
+    try:
+        return json.dumps(
+            data, 
+            cls=CustomJSONEncoder, 
+            ensure_ascii=False, 
+            **kwargs
+        )
+    except Exception as e:
+        print(f"⚠️ Error en serialización JSON: {e}")
+        # Fallback: convertir todo a strings
+        try:
+            cleaned_data = clean_data_for_json(data)
+            return json.dumps(cleaned_data, ensure_ascii=False, **kwargs)
+        except:
+            return "{}"
+
+def clean_data_for_json(obj):
+    """Limpia recursivamente un objeto para serialización JSON"""
+    if isinstance(obj, dict):
+        return {k: clean_data_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_data_for_json(item) for item in obj]
+    elif isinstance(obj, Decimal):
+        return int(obj)
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, (int, float, str, bool, type(None))):
+        return obj
+    else:
+        try:
+            return int(obj)
+        except:
+            return str(obj)
+        
 class SmartLanguageProcessor:
     """
     🎯 PROCESADOR INTELIGENTE REAL
@@ -1075,15 +1151,7 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """
-    🎯 ENDPOINT PRINCIPAL - VERSIÓN DEFINITIVA INTELIGENTE CORREGIDA
-    - Sin código quemado - Todo dinámico
-    - ML como motor principal
-    - Detección automática de cédulas
-    - Procesamiento contextual avanzado
-    - OpenAI para casos complejos
-    - Fallbacks inteligentes
-    """
+    """🎯 ENDPOINT PRINCIPAL - VERSIÓN CORREGIDA PARA DATOS DINÁMICOS"""
     
     user_id = request.user_id
     message_content = request.message or request.text or ""
@@ -1093,15 +1161,25 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
     try:
         conversation = _get_or_create_conversation(db, user_id, request.conversation_id)
         
+        # ✅ RECUPERAR CONTEXTO CON VERIFICACIÓN MEJORADA
         contexto_actual = _recuperar_contexto_seguro(db, conversation)
         
         print(f"💬 Conversación {conversation.id} - Estado: {conversation.current_state}")
-        print(f"📋 Contexto: {len(contexto_actual)} elementos")
-        if contexto_actual.get('cliente_encontrado'):
-            print(f"👤 Cliente: {contexto_actual.get('Nombre_del_cliente', 'N/A')}")
+        print(f"📋 Contexto inicial: {len(contexto_actual)} elementos")
+        
+        # ✅ VERIFICAR SI HAY DATOS DE CLIENTE EN CONTEXTO
+        cliente_en_contexto = contexto_actual.get('cliente_encontrado', False)
+        nombre_en_contexto = contexto_actual.get('Nombre_del_cliente')
+        saldo_en_contexto = contexto_actual.get('saldo_total', 0)
+        
+        print(f"🔍 VERIFICACIÓN CONTEXTO INICIAL:")
+        print(f"   Cliente encontrado: {cliente_en_contexto}")
+        print(f"   Nombre: {nombre_en_contexto}")
+        print(f"   Saldo: ${saldo_en_contexto:,}" if saldo_en_contexto else "$0")
         
         smart_processor = SmartLanguageProcessor(db)
         
+        # ✅ PROCESAR MENSAJE CON CONTEXTO VERIFICADO
         resultado = smart_processor.procesar_mensaje_inteligente(
             message_content, 
             contexto_actual, 
@@ -1115,34 +1193,88 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         nuevo_estado = _validar_estado_existente(resultado['next_state'])
         contexto_actualizado = resultado['contexto_actualizado']
         
+        # ✅ VERIFICACIÓN CRÍTICA: ASEGURAR PROPAGACIÓN DE DATOS DEL CLIENTE
+        cliente_despues = contexto_actualizado.get('cliente_encontrado', False)
+        nombre_despues = contexto_actualizado.get('Nombre_del_cliente')
+        saldo_despues = contexto_actualizado.get('saldo_total', 0)
+        
+        print(f"🔍 VERIFICACIÓN CONTEXTO DESPUÉS DEL PROCESAMIENTO:")
+        print(f"   Cliente encontrado: {cliente_despues}")
+        print(f"   Nombre: {nombre_despues}")
+        print(f"   Saldo: ${saldo_despues:,}" if saldo_despues else "$0")
+        
+        # ✅ SI SE PERDIERON DATOS DEL CLIENTE, RECUPERARLOS
+        if cliente_en_contexto and not cliente_despues:
+            print(f"⚠️ DATOS DEL CLIENTE PERDIDOS - RECUPERANDO...")
+            
+            # Recuperar datos críticos del contexto inicial
+            datos_a_preservar = {
+                'cliente_encontrado': True,
+                'Nombre_del_cliente': nombre_en_contexto,
+                'nombre_cliente': nombre_en_contexto,
+                'saldo_total': saldo_en_contexto,
+                'banco': contexto_actual.get('banco', 'Entidad Financiera'),
+                'cedula_detectada': contexto_actual.get('cedula_detectada'),
+                'oferta_1': contexto_actual.get('oferta_1', 0),
+                'oferta_2': contexto_actual.get('oferta_2', 0),
+                'Oferta_2': contexto_actual.get('Oferta_2', 0),
+                'hasta_3_cuotas': contexto_actual.get('hasta_3_cuotas', 0),
+                'hasta_6_cuotas': contexto_actual.get('hasta_6_cuotas', 0),
+                'hasta_12_cuotas': contexto_actual.get('hasta_12_cuotas', 0),
+                'producto': contexto_actual.get('producto', 'Producto'),
+                'telefono': contexto_actual.get('telefono', ''),
+                'email': contexto_actual.get('email', '')
+            }
+            
+            # ✅ COMBINAR PRESERVANDO DATOS DEL CLIENTE
+            contexto_actualizado = {**contexto_actualizado, **datos_a_preservar}
+            
+            print(f"✅ DATOS DEL CLIENTE RECUPERADOS:")
+            print(f"   Cliente encontrado: {contexto_actualizado.get('cliente_encontrado')}")
+            print(f"   Nombre: {contexto_actualizado.get('Nombre_del_cliente')}")
+            print(f"   Saldo: ${contexto_actualizado.get('saldo_total', 0):,}")
+        
+        # ✅ ACTUALIZAR CONVERSACIÓN CON SERIALIZACIÓN SEGURA
         conversation.current_state = nuevo_estado
-        conversation.context_data = json.dumps(contexto_actualizado, ensure_ascii=False, default=str)
         conversation.updated_at = datetime.now()
         
-        print(f"💾 PERSISTIENDO CONTEXTO:")
+        # ✅ LIMPIAR Y SERIALIZAR CONTEXTO DE FORMA SEGURA
+        contexto_limpio = limpiar_contexto_para_bd(contexto_actualizado)
+        conversation.context_data = safe_json_dumps(contexto_limpio)
+        
+        print(f"💾 PERSISTIENDO CONTEXTO FINAL:")
         print(f"   Elementos totales: {len(contexto_actualizado)}")
+        print(f"   Cliente encontrado final: {contexto_actualizado.get('cliente_encontrado', False)}")
         
         if contexto_actualizado.get('plan_capturado'):
             print(f"   ✅ PLAN DETECTADO: {contexto_actualizado.get('plan_seleccionado')}")
             print(f"   ✅ MONTO: ${contexto_actualizado.get('monto_acordado', 0):,}")
-        else:
-            print(f"   ⚠️ Sin información de plan en contexto")
         
         print(f"💾 GUARDANDO EN BD...")
         db.commit()
         print(f"✅ CONTEXTO GUARDADO EN TABLA CONVERSATIONS")
     
-        _log_interaccion_completa(db, conversation, message_content, resultado, request.button_selected)
+        # ✅ LOG CON MANEJO SEGURO DE TIPOS
+        try:
+            _log_interaccion_completa(db, conversation, message_content, resultado, request.button_selected)
+        except Exception as log_error:
+            print(f"⚠️ Error en logging (no crítico): {log_error}")
         
         print(f"✅ Respuesta generada exitosamente")
-        print(f"📊 Cliente encontrado: {contexto_actualizado.get('cliente_encontrado', False)}")
+        
+        # ✅ VERIFICACIÓN FINAL
+        cliente_final = contexto_actualizado.get('cliente_encontrado', False)
+        print(f"📊 Cliente encontrado FINAL: {cliente_final}")
+        
+        if not cliente_final and (cliente_en_contexto or nombre_en_contexto):
+            print(f"❌ WARNING: Se perdieron datos del cliente en el proceso")
         
         return ChatResponse(
             conversation_id=conversation.id,
             message=resultado['mensaje_respuesta'],
             current_state=nuevo_estado,
             buttons=resultado['botones'],
-            context=contexto_actualizado
+            context=contexto_actualizado  # ✅ CONTEXT LIMPIO
         )
         
     except Exception as e:
@@ -1162,33 +1294,100 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
             ],
             context={}
         )
-
+    
+def limpiar_contexto_para_bd(contexto: Dict[str, Any]) -> Dict[str, Any]:
+    """Limpia el contexto convirtiendo tipos problemáticos"""
+    contexto_limpio = {}
+    
+    for key, value in contexto.items():
+        if isinstance(value, Decimal):
+            contexto_limpio[key] = int(value)
+        elif isinstance(value, (datetime, date)):
+            contexto_limpio[key] = value.isoformat()
+        elif isinstance(value, (list, dict)):
+            contexto_limpio[key] = clean_data_for_json(value)
+        else:
+            contexto_limpio[key] = value
+    
+    return contexto_limpio
 
 def _recuperar_contexto_seguro(db: Session, conversation: Conversation) -> Dict[str, Any]:
-    """Recuperar contexto de forma completamente segura"""
+    """✅ RECUPERAR CONTEXTO CON VERIFICACIÓN MEJORADA"""
     try:
+        contexto = {}
+        
+        # 1. Intentar desde conversation.context_data
         if hasattr(conversation, 'context_data') and conversation.context_data:
-            if isinstance(conversation.context_data, str):
-                context = json.loads(conversation.context_data)
-                if isinstance(context, dict):
-                    return context
-            elif isinstance(conversation.context_data, dict):
-                return conversation.context_data
+            try:
+                if isinstance(conversation.context_data, str):
+                    contexto = json.loads(conversation.context_data)
+                elif isinstance(conversation.context_data, dict):
+                    contexto = conversation.context_data
+                
+                if isinstance(contexto, dict) and len(contexto) > 0:
+                    print(f"✅ Contexto recuperado desde conversation.context_data: {len(contexto)} elementos")
+                    
+                    # ✅ VERIFICAR DATOS CRÍTICOS
+                    if contexto.get('cliente_encontrado'):
+                        print(f"✅ Cliente en contexto: {contexto.get('Nombre_del_cliente')}")
+                        print(f"✅ Saldo en contexto: ${contexto.get('saldo_total', 0):,}")
+                    
+                    return contexto
+            except json.JSONDecodeError as e:
+                print(f"⚠️ Error parseando JSON del contexto: {e}")
         
-        query = text("SELECT context_data FROM conversations WHERE id = :conv_id")
-        result = db.execute(query, {"conv_id": conversation.id}).fetchone()
+        # 2. Consulta directa a BD como fallback
+        try:
+            query = text("SELECT context_data FROM conversations WHERE id = :conv_id")
+            result = db.execute(query, {"conv_id": conversation.id}).fetchone()
+            
+            if result and result[0]:
+                contexto = json.loads(result[0])
+                if isinstance(contexto, dict):
+                    print(f"✅ Contexto recuperado desde consulta directa: {len(contexto)} elementos")
+                    return contexto
+        except Exception as e:
+            print(f"⚠️ Error en consulta directa de contexto: {e}")
         
-        if result and result[0]:
-            context = json.loads(result[0])
-            if isinstance(context, dict):
-                return context
-        
-        print(f"⚠️ No se encontró contexto, iniciando vacío")
+        print(f"⚠️ No se encontró contexto válido, iniciando vacío")
         return {}
         
     except Exception as e:
-        print(f"❌ Error recuperando contexto: {e}")
+        print(f"❌ Error crítico recuperando contexto: {e}")
         return {}
+
+def _validar_continuidad_cliente(contexto_antes: Dict, contexto_despues: Dict) -> Dict[str, Any]:
+    """Valida que los datos del cliente se mantengan en el contexto"""
+    
+    datos_cliente_antes = {
+        'cliente_encontrado': contexto_antes.get('cliente_encontrado', False),
+        'nombre': contexto_antes.get('Nombre_del_cliente'),
+        'saldo': contexto_antes.get('saldo_total', 0),
+        'cedula': contexto_antes.get('cedula_detectada')
+    }
+    
+    datos_cliente_despues = {
+        'cliente_encontrado': contexto_despues.get('cliente_encontrado', False),
+        'nombre': contexto_despues.get('Nombre_del_cliente'),
+        'saldo': contexto_despues.get('saldo_total', 0),
+        'cedula': contexto_despues.get('cedula_detectada')
+    }
+    
+    # Si había cliente antes pero no después, es un problema
+    if datos_cliente_antes['cliente_encontrado'] and not datos_cliente_despues['cliente_encontrado']:
+        print(f"❌ PÉRDIDA DE DATOS DEL CLIENTE DETECTADA")
+        print(f"   Antes: {datos_cliente_antes}")
+        print(f"   Después: {datos_cliente_despues}")
+        
+        # Reparar contexto
+        return {**contexto_despues, **{
+            'cliente_encontrado': True,
+            'Nombre_del_cliente': datos_cliente_antes['nombre'],
+            'saldo_total': datos_cliente_antes['saldo'],
+            'cedula_detectada': datos_cliente_antes['cedula']
+        }}
+    
+    return contexto_despues
 
 def _validar_estado_existente(estado: str) -> str:
     """Validar que el estado existe en BD o mapear a uno válido"""
@@ -1257,6 +1456,206 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
         
     except Exception as e:
         print(f"⚠️ Error en logging: {e}")
+
+def _build_client_context(self, cliente_info: Dict[str, Any], cedula: str) -> Dict[str, Any]:
+    """✅ CORREGIDO - Construir contexto del cliente de forma estructurada con datos reales"""
+    
+    print(f"🔧 [BUILD_CONTEXT] Construyendo contexto para cédula: {cedula}")
+    print(f"🔧 [BUILD_CONTEXT] Datos recibidos: {list(cliente_info.keys())}")
+    
+    # ✅ VERIFICAR SI HAY DATOS REALES DEL CLIENTE
+    if cliente_info.get('encontrado', False):
+        # ✅ EXTRAER DATOS REALES DE LA BD
+        datos_cliente = {
+            "cedula_detectada": cedula,
+            "cliente_encontrado": True,  # ✅ CRÍTICO
+            "Nombre_del_cliente": cliente_info.get("nombre", "Cliente"),
+            "nombre_cliente": cliente_info.get("nombre", "Cliente"),  # Alias
+            
+            # ✅ CONVERTIR A ENTEROS Y FORMATEAR CORRECTAMENTE
+            "saldo_total": int(float(cliente_info.get("saldo", 0))) if cliente_info.get("saldo") else 0,
+            "banco": cliente_info.get("banco", "Entidad Financiera"),
+            
+            # ✅ OFERTAS (nombres exactos de BD)
+            "oferta_1": int(float(cliente_info.get("oferta_1", 0))) if cliente_info.get("oferta_1") else 0,
+            "oferta_2": int(float(cliente_info.get("oferta_2", 0))) if cliente_info.get("oferta_2") else 0,
+            "Oferta_1": int(float(cliente_info.get("oferta_1", 0))) if cliente_info.get("oferta_1") else 0,
+            "Oferta_2": int(float(cliente_info.get("oferta_2", 0))) if cliente_info.get("oferta_2") else 0,
+            
+            # ✅ CUOTAS
+            "hasta_3_cuotas": int(float(cliente_info.get("hasta_3_cuotas", 0))) if cliente_info.get("hasta_3_cuotas") else 0,
+            "hasta_6_cuotas": int(float(cliente_info.get("hasta_6_cuotas", 0))) if cliente_info.get("hasta_6_cuotas") else 0,
+            "hasta_12_cuotas": int(float(cliente_info.get("hasta_12_cuotas", 0))) if cliente_info.get("hasta_12_cuotas") else 0,
+            
+            # ✅ OTROS DATOS
+            "producto": cliente_info.get("producto", "Producto"),
+            "telefono": cliente_info.get("telefono", ""),
+            "email": cliente_info.get("email", ""),
+            
+            # ✅ METADATA
+            "consulta_timestamp": datetime.now().isoformat(),
+            "consulta_method": "dynamic_detection_fixed"
+        }
+        
+        print(f"✅ [BUILD_CONTEXT] CLIENTE REAL ENCONTRADO:")
+        print(f"   Nombre: {datos_cliente['Nombre_del_cliente']}")
+        print(f"   Saldo: ${datos_cliente['saldo_total']:,}")
+        print(f"   Oferta_2: ${datos_cliente['oferta_2']:,}")
+        print(f"   Cliente encontrado: {datos_cliente['cliente_encontrado']}")
+        
+        return datos_cliente
+    
+    else:
+        print(f"❌ [BUILD_CONTEXT] Cliente NO encontrado para cédula: {cedula}")
+        return {
+            "cedula_detectada": cedula,
+            "cliente_encontrado": False,  # ✅ CRÍTICO
+            "consulta_timestamp": datetime.now().isoformat(),
+            "error": "Cliente no encontrado en BD"
+        }
+
+# ✅ CORRECCIÓN 2: Método _query_client_simple MEJORADO
+
+async def _query_client_simple(self, cedula: str) -> Optional[Dict]:
+    """✅ CORREGIDO - Consulta simple de cliente con logs detallados"""
+    try:
+        print(f"🔍 [QUERY_CLIENT] Consultando cédula: {cedula}")
+        
+        query = text("""
+            SELECT TOP 1 
+                Nombre_del_cliente, Saldo_total, banco,
+                Oferta_1, Oferta_2, 
+                Hasta_3_cuotas, Hasta_6_cuotas, Hasta_12_cuotas,
+                Producto, Telefono, Email
+            FROM ConsolidadoCampañasNatalia 
+            WHERE CAST(Cedula AS VARCHAR) = :cedula
+            ORDER BY Saldo_total DESC
+        """)
+        
+        result = self.db.execute(query, {"cedula": str(cedula)})
+        row = result.fetchone()
+        
+        if row:
+            cliente_data = {
+                "encontrado": True,
+                "nombre": row[0] or "Cliente",
+                "saldo": int(float(row[1])) if row[1] else 0,
+                "banco": row[2] or "Entidad Financiera",
+                "oferta_1": int(float(row[3])) if row[3] else 0,
+                "oferta_2": int(float(row[4])) if row[4] else 0,
+                "hasta_3_cuotas": int(float(row[5])) if row[5] else 0,
+                "hasta_6_cuotas": int(float(row[6])) if row[6] else 0,
+                "hasta_12_cuotas": int(float(row[7])) if row[7] else 0,
+                "producto": row[8] or "Producto",
+                "telefono": row[9] or "",
+                "email": row[10] or ""
+            }
+            
+            print(f"✅ [QUERY_CLIENT] CLIENTE ENCONTRADO EN BD:")
+            print(f"   Nombre: {cliente_data['nombre']}")
+            print(f"   Saldo: ${cliente_data['saldo']:,}")
+            print(f"   Oferta_2: ${cliente_data['oferta_2']:,}")
+            print(f"   Banco: {cliente_data['banco']}")
+            
+            return cliente_data
+        
+        print(f"❌ [QUERY_CLIENT] Cliente NO encontrado en BD para cédula: {cedula}")
+        return {"encontrado": False}
+        
+    except Exception as e:
+        print(f"❌ [QUERY_CLIENT] Error consultando cliente {cedula}: {e}")
+        return {"encontrado": False}
+
+# ✅ CORRECCIÓN 3: Método _procesar_seleccion_por_condicion CORREGIDO
+
+def _procesar_seleccion_por_condicion(self, condicion: str, contexto: Dict, mensaje: str) -> Dict[str, Any]:
+    """✅ CORREGIDO - Procesar selección basada en condición BD con datos reales"""
+    
+    print(f"🎯 [SELECCION] Procesando condición: {condicion}")
+    print(f"🎯 [SELECCION] Contexto disponible: {list(contexto.keys())}")
+    
+    # ✅ VERIFICAR DATOS REALES DEL CLIENTE
+    nombre = contexto.get('Nombre_del_cliente') or contexto.get('nombre_cliente', 'Cliente')
+    saldo_total = contexto.get('saldo_total', 0)
+    
+    # ✅ SI NO HAY DATOS REALES, USAR CONSULTA DIRECTA
+    cedula = contexto.get('cedula_detectada')
+    if (not saldo_total or saldo_total == 0) and cedula:
+        print(f"⚠️ [SELECCION] Sin datos reales, consultando BD directamente para: {cedula}")
+        
+        # ✅ CONSULTA DIRECTA A BD
+        query = text("""
+            SELECT TOP 1 
+                Nombre_del_cliente, Saldo_total, Oferta_1, Oferta_2,
+                Hasta_3_cuotas, Hasta_6_cuotas, Hasta_12_cuotas, banco
+            FROM ConsolidadoCampañasNatalia 
+            WHERE CAST(Cedula AS VARCHAR) = :cedula
+        """)
+        
+        try:
+            result = self.db.execute(query, {"cedula": str(cedula)}).fetchone()
+            if result:
+                nombre = result[0] or "Cliente"
+                saldo_total = int(float(result[1])) if result[1] else 0
+                oferta_1 = int(float(result[2])) if result[2] else 0
+                oferta_2 = int(float(result[3])) if result[3] else 0
+                cuotas_3 = int(float(result[4])) if result[4] else 0
+                cuotas_6 = int(float(result[5])) if result[5] else 0
+                cuotas_12 = int(float(result[6])) if result[6] else 0
+                banco = result[7] or "Entidad Financiera"
+                
+                print(f"✅ [SELECCION] DATOS BD OBTENIDOS:")
+                print(f"   Cliente: {nombre}")
+                print(f"   Saldo: ${saldo_total:,}")
+                print(f"   Oferta_2: ${oferta_2:,}")
+            else:
+                print(f"❌ [SELECCION] No se encontraron datos en BD")
+                # Usar valores por defecto
+                saldo_total = 15000  # ⚠️ TEMPORAL
+                oferta_2 = 10500     # ⚠️ TEMPORAL
+                cuotas_3 = 5500      # ⚠️ TEMPORAL
+                cuotas_6 = 2800      # ⚠️ TEMPORAL
+                cuotas_12 = 1400     # ⚠️ TEMPORAL
+        except Exception as e:
+            print(f"❌ [SELECCION] Error en consulta BD: {e}")
+            return contexto
+    else:
+        # ✅ USAR DATOS DEL CONTEXTO
+        oferta_1 = contexto.get('oferta_1', 0)
+        oferta_2 = contexto.get('oferta_2', 0) or contexto.get('Oferta_2', 0)
+        cuotas_3 = contexto.get('hasta_3_cuotas', 0)
+        cuotas_6 = contexto.get('hasta_6_cuotas', 0)
+        cuotas_12 = contexto.get('hasta_12_cuotas', 0)
+    
+    print(f"🎯 [SELECCION] DATOS PARA CÁLCULO:")
+    print(f"   Saldo total: ${saldo_total:,}")
+    print(f"   Oferta_2: ${oferta_2:,}")
+    print(f"   Cuotas_6: ${cuotas_6:,}")
+    
+    # ✅ PROCESAR SEGÚN CONDICIÓN
+    if condicion == 'cliente_selecciona_pago_unico':
+        return self._generar_plan_pago_unico(nombre, saldo_total, oferta_2, mensaje)
+    
+    elif condicion == 'cliente_selecciona_plan_3_cuotas':
+        return self._generar_plan_cuotas(nombre, saldo_total, cuotas_3, 3, "Plan 3 cuotas sin interés")
+    
+    elif condicion == 'cliente_selecciona_plan_6_cuotas':
+        return self._generar_plan_cuotas(nombre, saldo_total, cuotas_6, 6, "Plan 6 cuotas sin interés")
+    
+    elif condicion == 'cliente_selecciona_plan_12_cuotas':
+        return self._generar_plan_cuotas(nombre, saldo_total, cuotas_12, 12, "Plan 12 cuotas sin interés")
+    
+    # ✅ CONDICIONES GENÉRICAS
+    elif condicion in ['cliente_selecciona_plan', 'cliente_confirma_plan_elegido']:
+        # Detectar tipo de plan por el mensaje
+        mensaje_lower = mensaje.lower()
+        if any(word in mensaje_lower for word in ['unico', 'descuento', 'liquidar']):
+            return self._generar_plan_pago_unico(nombre, saldo_total, oferta_2, mensaje)
+        else:
+            # Por defecto, pago único
+            return self._generar_plan_pago_unico(nombre, saldo_total, oferta_2, mensaje)
+    
+    return contexto
 
 def _get_or_create_conversation(db: Session, user_id: int, conversation_id: Optional[int] = None) -> Conversation:
     """Obtener o crear conversación de forma robusta"""

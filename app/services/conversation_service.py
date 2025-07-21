@@ -419,14 +419,14 @@ class ConversationService:
         return {
             "cedula_detectada": cedula,
             "cliente_encontrado": True,
-            "Nombre_del_cliente": datos_cliente.get("nombre", "Cliente"),
-            "saldo_total": datos_cliente.get("saldo", 0),
-            "banco": datos_cliente.get("banco", "Entidad Financiera"),
-            "oferta_1": datos_cliente.get("oferta_1", 0),
-            "oferta_2": datos_cliente.get("oferta_2", 0),
-            "hasta_3_cuotas": datos_cliente.get("hasta_3_cuotas", 0),
-            "hasta_6_cuotas": datos_cliente.get("hasta_6_cuotas", 0),
-            "hasta_12_cuotas": datos_cliente.get("hasta_12_cuotas", 0),
+            "Nombre_del_cliente": cliente_info.get("nombre", "Cliente"),  
+            "saldo_total": cliente_info.get("saldo", 0), 
+            "banco": cliente_info.get("banco", "Entidad Financiera"),
+            "oferta_1": cliente_info.get("oferta_1", 0),
+            "oferta_2": cliente_info.get("oferta_2", 0),
+            "hasta_3_cuotas": cliente_info.get("hasta_3_cuotas", 0),
+            "hasta_6_cuotas": cliente_info.get("hasta_6_cuotas", 0),
+            "hasta_12_cuotas": cliente_info.get("hasta_12_cuotas", 0),
             "consulta_timestamp": datetime.now().isoformat(),
             "consulta_method": "dynamic_detection"
         }
@@ -836,7 +836,7 @@ class ConversationService:
             return {}
     
     def _update_context_simple(self, conversation: Conversation, updates: Dict):
-        """Actualizar contexto de forma simple"""
+        """✅ CORREGIDO - Preservar datos del cliente"""
         try:
             current_context = {}
             if hasattr(conversation, 'context_data') and conversation.context_data:
@@ -845,16 +845,26 @@ class ConversationService:
                 except:
                     pass
             
-            current_context.update(updates)
-            context_json = json.dumps(current_context, ensure_ascii=False, default=str)
+            # ✅ PRESERVAR DATOS CRÍTICOS DEL CLIENTE
+            client_data_keys = [
+                'cliente_encontrado', 'Nombre_del_cliente', 'saldo_total',
+                'banco', 'oferta_1', 'oferta_2', 'hasta_3_cuotas', 
+                'hasta_6_cuotas', 'hasta_12_cuotas', 'cedula_detectada'
+            ]
             
+            # Solo actualizar si no sobrescribe datos del cliente
+            for key, value in updates.items():
+                if key in client_data_keys:
+                    # Si ya hay datos del cliente, no sobrescribir con valores por defecto
+                    if current_context.get(key) and value == 0:
+                        print(f"⚠️ Preservando {key} del cliente: {current_context[key]}")
+                        continue
+                current_context[key] = value
+            
+            context_json = json.dumps(current_context, ensure_ascii=False, default=str)
             conversation.context_data = context_json
             
-            # Actualizar cache
-            CONTEXT_CACHE[conversation.id] = current_context
-            CACHE_TIMESTAMPS[conversation.id] = time.time()
-            
-            logger.info(f"💾 Contexto actualizado: {len(updates)} elementos")
+            print(f"💾 Contexto actualizado preservando datos del cliente")
             
         except Exception as e:
             logger.error(f"❌ Error actualizando contexto: {e}")

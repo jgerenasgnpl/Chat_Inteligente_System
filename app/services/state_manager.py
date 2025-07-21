@@ -4,18 +4,110 @@ from sqlalchemy import text
 from fastapi import HTTPException, status
 from typing import Optional, Dict, Any
 import json
-from datetime import datetime
+from datetime import datetime, date
+from decimal import Decimal
 
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
 
 import yaml
+
 try:
     with open("base_conocimiento.yaml", encoding="utf-8") as f:
         kb = yaml.safe_load(f)
 except:
     kb = {}
+
+# ✅ FUNCIONES DE SERIALIZACIÓN JSON MOVIDAS AQUÍ (sin importación circular)
+class CustomJSONEncoder(json.JSONEncoder):
+    """Encoder personalizado para manejar tipos especiales"""
+    
+    def default(self, obj):
+        # ✅ DECIMAL → INT
+        if isinstance(obj, Decimal):
+            return int(obj)
+        
+        # ✅ DATETIME → ISO STRING
+        elif isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        
+        # ✅ NUMPY TYPES (si están presentes)
+        elif hasattr(obj, 'item'):
+            return obj.item()
+        
+        # ✅ BYTES → STRING
+        elif isinstance(obj, bytes):
+            return obj.decode('utf-8', errors='ignore')
+        
+        # ✅ SET → LIST
+        elif isinstance(obj, set):
+            return list(obj)
+        
+        # ✅ OTROS TIPOS NUMÉRICOS
+        elif hasattr(obj, '__int__'):
+            try:
+                return int(obj)
+            except:
+                return str(obj)
+        
+        # ✅ FALLBACK
+        try:
+            return super().default(obj)
+        except TypeError:
+            return str(obj)
+
+def safe_json_dumps(data: any, **kwargs) -> str:
+    """Serialización JSON segura que maneja todos los tipos"""
+    try:
+        return json.dumps(
+            data, 
+            cls=CustomJSONEncoder, 
+            ensure_ascii=False, 
+            **kwargs
+        )
+    except Exception as e:
+        print(f"⚠️ Error en serialización JSON: {e}")
+        # Fallback: convertir todo a strings
+        try:
+            cleaned_data = clean_data_for_json(data)
+            return json.dumps(cleaned_data, ensure_ascii=False, **kwargs)
+        except:
+            return "{}"
+
+def clean_data_for_json(obj):
+    """Limpia recursivamente un objeto para serialización JSON"""
+    if isinstance(obj, dict):
+        return {k: clean_data_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_data_for_json(item) for item in obj]
+    elif isinstance(obj, Decimal):
+        return int(obj)
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, (int, float, str, bool, type(None))):
+        return obj
+    else:
+        try:
+            return int(obj)
+        except:
+            return str(obj)
+
+def limpiar_contexto_para_bd(contexto: Dict[str, Any]) -> Dict[str, Any]:
+    """Limpia el contexto convirtiendo tipos problemáticos"""
+    contexto_limpio = {}
+    
+    for key, value in contexto.items():
+        if isinstance(value, Decimal):
+            contexto_limpio[key] = int(value)
+        elif isinstance(value, (datetime, date)):
+            contexto_limpio[key] = value.isoformat()
+        elif isinstance(value, (list, dict)):
+            contexto_limpio[key] = clean_data_for_json(value)
+        else:
+            contexto_limpio[key] = value
+    
+    return contexto_limpio
 
 class StateManager:
     """
@@ -82,24 +174,26 @@ class StateManager:
             conversation.current_state = new_state
             print(f"🔄 Estado actualizado: {new_state}")
             
-            # 2. Manejar contexto de forma simple
+            # 2. ✅ Manejar contexto de forma segura con serialización mejorada
             if context:
                 try:
-                    context_json = json.dumps(context, ensure_ascii=False, default=str)
+                    # ✅ LIMPIAR CONTEXTO ANTES DE SERIALIZAR
+                    context_limpio = limpiar_contexto_para_bd(context)
+                    context_json = safe_json_dumps(context_limpio)
                     
                     # Usar métodos del objeto si existen
-                    if hasattr(conversation, 'context'):
-                        conversation.context = context_json
-                    
-                    if hasattr(conversation, 'context'):
-                        conversation.context = context_json
+                    if hasattr(conversation, 'context_data'):
+                        conversation.context_data = context_json
                     
                     print(f"💾 Contexto guardado: {len(context)} elementos")
                     
                 except Exception as e:
                     print(f"❌ Error guardando contexto: {e}")
+                    # Fallback sin contexto
+                    pass
             
-            # 3. Commit simple sin backups complicados
+            # 3. Commit simple
+            conversation.updated_at = datetime.now()
             db.commit()
             db.refresh(conversation)
             
@@ -110,15 +204,6 @@ class StateManager:
             db.rollback()
             print(f"❌ Error actualizando conversación: {e}")
             raise
-
-        except Exception as e:
-            db.rollback()
-            error_msg = f"Error inesperado: {str(e)}"
-            print(f"❌ {error_msg}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg
-            )
         
     @staticmethod
     def _backup_context_to_database_CORREGIDO(db: Session, conversation_id: int, context: Dict[str, Any]):
@@ -227,24 +312,24 @@ class StateManager:
         ✅ VERSIÓN MEJORADA - Obtiene context como diccionario de forma segura
         """
         try:
-            # 1. Verificar context (campo principal)
-            if hasattr(conversation, 'context') and conversation.context:
-                if isinstance(conversation.context, dict):
-                    return conversation.context
-                elif isinstance(conversation.context, str) and conversation.context.strip():
+            # 1. Verificar context_data (campo principal)
+            if hasattr(conversation, 'context_data') and conversation.context_data:
+                if isinstance(conversation.context_data, dict):
+                    return conversation.context_data
+                elif isinstance(conversation.context_data, str) and conversation.context_data.strip():
                     try:
-                        parsed = json.loads(conversation.context)
+                        parsed = json.loads(conversation.context_data)
                         if isinstance(parsed, dict):
                             return parsed
                     except json.JSONDecodeError:
                         pass
             
-            # 2. Verificar context (campo backup)
-            if hasattr(conversation, 'context') and conversation.context:
-                if isinstance(conversation.context, str) and conversation.context.strip():
+            # 2. Verificar context_data (campo backup)
+            if hasattr(conversation, 'context_data') and conversation.context_data:
+                if isinstance(conversation.context_data, str) and conversation.context_data.strip():
                     try:
-                        if conversation.context.startswith('{'):
-                            parsed = json.loads(conversation.context)
+                        if conversation.context_data.startswith('{'):
+                            parsed = json.loads(conversation.context_data)
                             if isinstance(parsed, dict):
                                 return parsed
                     except json.JSONDecodeError:
@@ -255,32 +340,3 @@ class StateManager:
         except Exception as e:
             print(f"⚠️ Error obteniendo contexto: {e}")
             return {}
-    
-    # @staticmethod
-    # def create_context_backup_table(db: Session):
-    #    """✅ NUEVO - Crear tabla de backup para contextos"""
-    #    try:
-    #        create_table_query = text("""
-    #            IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'messages')
-    #            BEGIN
-    #                CREATE TABLE messages (
-    #                    id INT IDENTITY(1,1) PRIMARY KEY,
-    #                    conversation_id INT NOT NULL,
-    #                    context_json NVARCHAR(MAX) NOT NULL,
-    #                    created_at DATETIME NOT NULL,
-    #                    updated_at DATETIME NOT NULL,
-    #                    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
-    #               )
-                    
-    #                CREATE INDEX IDX_conversation_context_backup_conv_id 
-    #                ON conversation_context_backup(conversation_id)
-    #            END
-    #        """)
-    #        
-    #        db.execute(create_table_query)
-    #        db.commit()
-    #        print(f"✅ Tabla de backup de contextos creada/verificada")
-    #        
-    #    except Exception as e:
-    #        print(f"⚠️ Error creando tabla backup: {e}")
-    #        db.rollback()
