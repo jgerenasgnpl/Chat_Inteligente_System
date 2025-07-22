@@ -333,19 +333,28 @@ class SmartLanguageProcessor:
             contexto_con_plan = self._procesar_seleccion_por_condicion(condicion, contexto_actualizado, mensaje)
             if contexto_con_plan.get('plan_capturado'):
                 return contexto_con_plan
-        
-        plan_detectado = self._detectar_plan_directo(mensaje_lower, contexto_actualizado)
-        if plan_detectado:
-            print(f"🎯 PLAN DETECTADO DIRECTAMENTE: {plan_detectado['tipo']}")
-            contexto_actualizado.update(plan_detectado)
+            # Si la condición era de selección de plan, pero no se pudo capturar el plan (ej. datos faltantes),
+            # entonces el flujo podría caer en la detección directa
+            print(f"⚠️ La condición '{condicion}' no resultó en captura de plan, intentando detección directa.")
+
+        # Intentar detectar plan directamente por palabras clave (si no se capturó por condición o si la condición fue 'no_transition')
+        plan_detectado_directo = self._detectar_plan_directo(mensaje_lower, contexto_actualizado)
+        if plan_detectado_directo:
+            # Aseguramos que 'tipo_plan' exista antes de usar 'tipo'
+            plan_tipo_para_log = plan_detectado_directo.get('tipo_plan', 'desconocido')
+            print(f"🎯 PLAN DETECTADO DIRECTAMENTE: {plan_tipo_para_log}")
+            contexto_actualizado.update(plan_detectado_directo)
             return contexto_actualizado
-        
+
+        # Intentar detectar selección numérica (si no se capturó antes)
         plan_por_numero = self._detectar_seleccion_numerica(mensaje_lower, contexto_actualizado)
         if plan_por_numero:
-            print(f"🎯 PLAN DETECTADO POR NÚMERO: {plan_por_numero['tipo']}")
+            # Aseguramos que 'tipo_plan' exista antes de usar 'tipo'
+            plan_tipo_para_log = plan_por_numero.get('tipo_plan', 'desconocido')
+            print(f"🎯 PLAN DETECTADO POR NÚMERO: {plan_tipo_para_log}")
             contexto_actualizado.update(plan_por_numero)
             return contexto_actualizado
-        
+
         print(f"ℹ️ No se detectó selección de plan válida")
         return contexto_actualizado
 
@@ -1420,21 +1429,11 @@ def _validar_estado_existente(estado: str) -> str:
     
     return estado_mapeado
 
-def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_usuario: str, 
+def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_usuario: str,
                              resultado: Dict[str, Any], button_selected: Optional[str]):
     """✅ VERSIÓN CORREGIDA - Log completo con serialización segura"""
     try:
-        LogService.log_message_safe(
-            db=db,
-            conversation_id=conversation.id,
-            sender_type="system",
-            text_content=resultado['mensaje_respuesta'],
-            previous_state=conversation.current_state,
-            next_state=resultado['next_state'],
-            metadata_dict=metadata_raw  # ✅ PASAR DICT, NO STRING
-        )
-        
-        # ✅ LIMPIAR METADATA ANTES DE SERIALIZAR
+        # ✅ DEFINIR metadata_raw ANTES DE USARLA
         metadata_raw = {
             "intencion_detectada": resultado.get('intencion'),
             "metodo_procesamiento": resultado.get('metodo'),
@@ -1444,15 +1443,17 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
             "deteccion_automatica_cedulas": True,
             "procesamiento_dinamico": True,
             "timestamp": datetime.now().isoformat(),
-            "transition_info": resultado.get('transition_info', {})  # Esto puede contener Decimal
+            # Asegúrate de que transition_info sea un dict, incluso si está ausente
+            "transition_info": resultado.get('transition_info', {}) if isinstance(resultado.get('transition_info'), dict) else {}
         }
-        
-        # ✅ USAR FUNCIÓN DE LIMPIEZA PARA METADATA
+
+        # ✅ USAR FUNCIÓN DE LIMPIEZA PARA METADATA (MANEJA DECIMAL Y DATETIME)
         metadata_limpio = clean_data_for_json(metadata_raw)
-        
-        # ✅ USAR ENCODER PERSONALIZADO
+
+        # ✅ USAR ENCODER PERSONALIZADO PARA SERIALIZACIÓN SEGURA
         metadata_json = safe_json_dumps(metadata_limpio)
-        
+
+        # ✅ UNICA LLAMADA AL SERVICIO DE LOG CON LA METADATA CORRECTAMENTE SERIALIZADA
         LogService.log_message(
             db=db,
             conversation_id=conversation.id,
@@ -1460,9 +1461,9 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
             text_content=resultado['mensaje_respuesta'],
             previous_state=conversation.current_state,
             next_state=resultado['next_state'],
-            metadata=metadata_json  # ✅ AHORA USA SERIALIZACIÓN SEGURA
+            metadata=metadata_json  # ✅ AHORA USA SERIALIZACIÓN SEGURA Y LA VARIABLE ESTÁ DEFINIDA
         )
-        
+
     except Exception as e:
         print(f"⚠️ Error en logging (no crítico): {e}")
         # ✅ LOGGING SIMPLIFICADO SIN METADATA COMO FALLBACK
@@ -1475,8 +1476,8 @@ def _log_interaccion_completa(db: Session, conversation: Conversation, mensaje_u
                 previous_state=conversation.current_state,
                 next_state=resultado['next_state']
             )
-        except:
-            pass  # No es crítico si falla el logging
+        except Exception as fallback_e:
+            print(f"❌ Error en fallback de logging: {fallback_e}")
 
 def _build_client_context(self, cliente_info: Dict[str, Any], cedula: str) -> Dict[str, Any]:
     """✅ CORREGIDO - Construir contexto del cliente de forma estructurada con datos reales"""
