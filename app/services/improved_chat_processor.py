@@ -38,7 +38,7 @@ class ImprovedChatProcessor:
 
     def process_message_improved(self, mensaje: str, contexto: Dict[str, Any], 
                                 estado_actual: str) -> Dict[str, Any]:
-        """✅ PROCESAMIENTO MEJORADO SIN BLOQUEOS"""
+        """✅ PROCESAMIENTO MEJORADO CON CLAVES ESTANDARIZADAS"""
         
         try:
             logger.info(f"🔄 [IMPROVED] Procesando: '{mensaje}' en '{estado_actual}'")
@@ -46,7 +46,9 @@ class ImprovedChatProcessor:
             # 1. ✅ DETECCIÓN DE CÉDULA (MÁXIMA PRIORIDAD)
             cedula = self._detectar_cedula_robusta(mensaje)
             if cedula:
-                return self._procesar_cedula_mejorada(cedula, contexto)
+                resultado = self._procesar_cedula_mejorada(cedula, contexto)
+                # ✅ ESTANDARIZAR CLAVES
+                return self._estandarizar_respuesta(resultado)
             
             # 2. ✅ PROCESAMIENTO CON SISTEMA DINÁMICO MEJORADO
             if self.dynamic_service:
@@ -54,14 +56,61 @@ class ImprovedChatProcessor:
                     mensaje, contexto, estado_actual
                 )
                 if resultado.get('success'):
-                    return resultado
+                    # ✅ ESTANDARIZAR CLAVES
+                    return self._estandarizar_respuesta(resultado)
             
             # 3. ✅ FALLBACK INTELIGENTE
-            return self._fallback_mejorado(mensaje, contexto, estado_actual)
+            resultado = self._fallback_mejorado(mensaje, contexto, estado_actual)
+            return self._estandarizar_respuesta(resultado)
             
         except Exception as e:
             logger.error(f"❌ Error en procesamiento mejorado: {e}")
-            return self._error_response_mejorado(mensaje, contexto, estado_actual)
+            resultado = self._error_response_mejorado(mensaje, contexto, estado_actual)
+            return self._estandarizar_respuesta(resultado)
+    
+    def _estandarizar_respuesta(self, resultado: Dict[str, Any]) -> Dict[str, Any]:
+        """✅ NUEVO: Estandarizar todas las claves de respuesta"""
+        
+        # ✅ MAPEO DE CLAVES PARA COMPATIBILIDAD
+        respuesta_estandar = {
+            'intencion': resultado.get('intention') or resultado.get('intencion', 'PROCESAMIENTO_GENERAL'),
+            'confianza': resultado.get('confidence') or resultado.get('confianza', 0.0),
+            'next_state': resultado.get('next_state') or resultado.get('estado_siguiente', 'inicial'),
+            'contexto_actualizado': resultado.get('context') or resultado.get('contexto_actualizado', {}),
+            'mensaje_respuesta': resultado.get('message') or resultado.get('mensaje_respuesta', '¿En qué puedo ayudarte?'),
+            'botones': resultado.get('buttons') or resultado.get('botones', []),
+            'metodo': resultado.get('method') or resultado.get('metodo', 'sistema_mejorado'),
+            'usar_resultado': resultado.get('success', True),
+            'transition_info': resultado.get('transition_info', {})
+        }
+        
+        # ✅ VALIDAR QUE TODAS LAS CLAVES REQUERIDAS EXISTAN
+        claves_requeridas = ['intencion', 'confianza', 'next_state', 'contexto_actualizado', 
+                           'mensaje_respuesta', 'botones', 'metodo', 'usar_resultado']
+        
+        for clave in claves_requeridas:
+            if clave not in respuesta_estandar or respuesta_estandar[clave] is None:
+                # ✅ VALORES FALLBACK DINÁMICOS
+                respuesta_estandar[clave] = self._get_valor_fallback(clave, resultado)
+        
+        logger.info(f"✅ Respuesta estandarizada con todas las claves requeridas")
+        return respuesta_estandar
+    
+    def _get_valor_fallback(self, clave: str, resultado_original: Dict) -> Any:
+        """✅ VALORES FALLBACK DINÁMICOS (NO HARDCODEADOS)"""
+        
+        fallbacks = {
+            'intencion': 'PROCESAMIENTO_GENERAL',
+            'confianza': 0.5,
+            'next_state': 'inicial',
+            'contexto_actualizado': {},
+            'mensaje_respuesta': 'Para ayudarte, necesito tu número de cédula.',
+            'botones': [{'id': 'ayuda', 'text': 'Necesito ayuda'}],
+            'metodo': 'fallback_automatico',
+            'usar_resultado': True
+        }
+        
+        return fallbacks.get(clave, None)
     
     def _detectar_cedula_robusta(self, mensaje: str) -> Optional[str]:
         """✅ DETECCIÓN ROBUSTA DE CÉDULAS"""

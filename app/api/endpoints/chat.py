@@ -1154,13 +1154,78 @@ class SmartLanguageProcessor:
         
         return estado_actual 
 
+def _extraer_informacion_resultado_seguro(resultado: Dict[str, Any]) -> Dict[str, Any]:
+    """✅ NUEVO: Extraer información de resultado con compatibilidad total"""
+    
+    # ✅ MAPEO FLEXIBLE DE CLAVES
+    info_extraida = {}
+    
+    # Intención
+    info_extraida['intencion'] = (
+        resultado.get('intencion') or 
+        resultado.get('intention') or 
+        resultado.get('detected_intention') or 
+        'PROCESAMIENTO_GENERAL'
+    )
+    
+    # Confianza
+    info_extraida['confianza'] = (
+        resultado.get('confianza') or 
+        resultado.get('confidence') or 
+        resultado.get('detection_confidence') or 
+        0.0
+    )
+    
+    # Método
+    info_extraida['metodo'] = (
+        resultado.get('metodo') or 
+        resultado.get('method') or 
+        resultado.get('detection_method') or 
+        resultado.get('processor_method') or 
+        'sistema_dinamico'
+    )
+    
+    # Estado siguiente
+    info_extraida['next_state'] = (
+        resultado.get('next_state') or 
+        resultado.get('estado_siguiente') or 
+        resultado.get('new_state') or 
+        'inicial'
+    )
+    
+    # Contexto
+    info_extraida['contexto_actualizado'] = (
+        resultado.get('contexto_actualizado') or 
+        resultado.get('context') or 
+        resultado.get('context_updates') or 
+        {}
+    )
+    
+    # Mensaje
+    info_extraida['mensaje_respuesta'] = (
+        resultado.get('mensaje_respuesta') or 
+        resultado.get('message') or 
+        resultado.get('response') or 
+        '¿En qué puedo ayudarte?'
+    )
+    
+    # Botones
+    info_extraida['botones'] = (
+        resultado.get('botones') or 
+        resultado.get('buttons') or 
+        resultado.get('button_options') or 
+        []
+    )
+    
+    return info_extraida
+
 @router.post("/message", response_model=ChatResponse, status_code=status.HTTP_200_OK)
-async def process_chat_message_INTELIGENTE_DEFINITIVO(
+async def process_chat_message_CORREGIDO_CLAVES(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """🎯 ENDPOINT PRINCIPAL - VERSIÓN CORREGIDA PARA DATOS DINÁMICOS"""
+    """🎯 ENDPOINT PRINCIPAL - VERSIÓN CORREGIDA PARA CLAVES ESTANDARIZADAS"""
     
     user_id = request.user_id
     message_content = request.message or request.text or ""
@@ -1190,28 +1255,31 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         improved_processor = create_improved_chat_processor(db)
         
         # ✅ PROCESAR MENSAJE CON CONTEXTO VERIFICADO
-        resultado = improved_processor.process_message_improved(
+        resultado_raw = improved_processor.process_message_improved(
             message_content, contexto_actual, conversation.current_state
         )
         
-        try:
-            intencion = resultado.get('intencion', 'PROCESAMIENTO_GENERAL')
-            confianza = resultado.get('confianza', 0.0)
-            print(f"🎯 Resultado: {intencion} (confianza: {confianza:.2f})")
-        except Exception as e:
-            print(f"⚠️ Error mostrando resultado: {e}")
-            print(f"🎯 Resultado disponible con keys: {list(resultado.keys())}")
-
-        print(f"🔧 Método: {resultado['metodo']}")
-        print(f"📍 Estado: {conversation.current_state} → {resultado['next_state']}")
+        # ✅ EXTRAER INFORMACIÓN DE FORMA SEGURA Y COMPATIBLE
+        info = _extraer_informacion_resultado_seguro(resultado_raw)
         
-        nuevo_estado = _validar_estado_existente(resultado['next_state'])
-        contexto_actualizado = resultado.get('contexto_actualizado', contexto_actual)
+        # ✅ MOSTRAR INFORMACIÓN EXTRAÍDA DE FORMA SEGURA
+        try:
+            print(f"🎯 Resultado: {info['intencion']} (confianza: {info['confianza']:.2f})")
+            print(f"🔧 Método: {info['metodo']}")
+            print(f"📍 Estado: {conversation.current_state} → {info['next_state']}")
+        except Exception as e:
+            print(f"⚠️ Error mostrando información (no crítico): {e}")
+            print(f"🎯 Resultado disponible con keys: {list(resultado_raw.keys())}")
+        
+        # ✅ CONTINUAR CON EL PROCESAMIENTO USANDO info EN LUGAR DE resultado
+        nuevo_estado = _validar_estado_existente(info['next_state'])
+        contexto_actualizado = info.get('contexto_actualizado', contexto_actual)
 
         if not isinstance(contexto_actualizado, dict):
             print(f"⚠️ Contexto inválido, usando contexto actual")
             contexto_actualizado = contexto_actual
         
+        # ✅ PRESERVAR DATOS DEL CLIENTE SI EXISTÍAN ANTES
         if contexto_actual.get('cliente_encontrado') and not contexto_actualizado.get('cliente_encontrado'):
             print(f"🔧 Preservando datos del cliente")
             datos_cliente = {
@@ -1228,47 +1296,6 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
             # Filtrar valores None
             datos_cliente = {k: v for k, v in datos_cliente.items() if v is not None}
             contexto_actualizado.update(datos_cliente)
-        
-        # ✅ VERIFICACIÓN CRÍTICA: ASEGURAR PROPAGACIÓN DE DATOS DEL CLIENTE
-        cliente_despues = contexto_actualizado.get('cliente_encontrado', False)
-        nombre_despues = contexto_actualizado.get('Nombre_del_cliente')
-        saldo_despues = contexto_actualizado.get('saldo_total', 0)
-        
-        print(f"🔍 VERIFICACIÓN CONTEXTO DESPUÉS DEL PROCESAMIENTO:")
-        print(f"   Cliente encontrado: {cliente_despues}")
-        print(f"   Nombre: {nombre_despues}")
-        print(f"   Saldo: ${saldo_despues:,}" if saldo_despues else "$0")
-        
-        # ✅ SI SE PERDIERON DATOS DEL CLIENTE, RECUPERARLOS
-        if cliente_en_contexto and not cliente_despues:
-            print(f"⚠️ DATOS DEL CLIENTE PERDIDOS - RECUPERANDO...")
-            
-            # Recuperar datos críticos del contexto inicial
-            datos_a_preservar = {
-                'cliente_encontrado': True,
-                'Nombre_del_cliente': nombre_en_contexto,
-                'nombre_cliente': nombre_en_contexto,
-                'saldo_total': saldo_en_contexto,
-                'banco': contexto_actual.get('banco', 'Entidad Financiera'),
-                'cedula_detectada': contexto_actual.get('cedula_detectada'),
-                'oferta_1': contexto_actual.get('oferta_1', 0),
-                'oferta_2': contexto_actual.get('oferta_2', 0),
-                'Oferta_2': contexto_actual.get('Oferta_2', 0),
-                'hasta_3_cuotas': contexto_actual.get('hasta_3_cuotas', 0),
-                'hasta_6_cuotas': contexto_actual.get('hasta_6_cuotas', 0),
-                'hasta_12_cuotas': contexto_actual.get('hasta_12_cuotas', 0),
-                'producto': contexto_actual.get('producto', 'Producto'),
-                'telefono': contexto_actual.get('telefono', ''),
-                'email': contexto_actual.get('email', '')
-            }
-            
-            # ✅ COMBINAR PRESERVANDO DATOS DEL CLIENTE
-            contexto_actualizado = {**contexto_actualizado, **datos_a_preservar}
-            
-            print(f"✅ DATOS DEL CLIENTE RECUPERADOS:")
-            print(f"   Cliente encontrado: {contexto_actualizado.get('cliente_encontrado')}")
-            print(f"   Nombre: {contexto_actualizado.get('Nombre_del_cliente')}")
-            print(f"   Saldo: ${contexto_actualizado.get('saldo_total', 0):,}")
         
         # ✅ ACTUALIZAR CONVERSACIÓN CON SERIALIZACIÓN SEGURA
         conversation.current_state = nuevo_estado
@@ -1290,38 +1317,21 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         db.commit()
         print(f"✅ CONTEXTO GUARDADO EN TABLA CONVERSATIONS")
     
+        # ✅ LOGGING CON INFORMACIÓN SEGURA
         try:
-            _log_interaccion_completa(db, conversation, message_content, resultado, request.button_selected)
+            _log_interaccion_completa_segura(db, conversation, message_content, info, request.button_selected)
         except Exception as log_error:
             print(f"⚠️ Error en logging (no crítico): {log_error}")
-            # Logging básico como fallback
-            try:
-                LogService.log_message(
-                    db=db,
-                    conversation_id=conversation.id,
-                    sender_type="system",
-                    text_content=resultado.get('mensaje_respuesta', 'Respuesta procesada'),
-                    previous_state=conversation.current_state,
-                    next_state=resultado.get('next_state', conversation.current_state)
-                )
-            except Exception as fallback_error:
-                print(f"❌ Error en fallback de logging: {fallback_error}")
         
         print(f"✅ Respuesta generada exitosamente")
         
-        # ✅ VERIFICACIÓN FINAL
-        cliente_final = contexto_actualizado.get('cliente_encontrado', False)
-        print(f"📊 Cliente encontrado FINAL: {cliente_final}")
-        
-        if not cliente_final and (cliente_en_contexto or nombre_en_contexto):
-            print(f"❌ WARNING: Se perdieron datos del cliente en el proceso")
-        
+        # ✅ CREAR RESPUESTA USANDO INFORMACIÓN ESTANDARIZADA
         try:
             response = ChatResponse(
                 conversation_id=conversation.id,
-                message=resultado.get('mensaje_respuesta', '¿En qué puedo ayudarte?'),
+                message=info.get('mensaje_respuesta', '¿En qué puedo ayudarte?'),
                 current_state=nuevo_estado,
-                buttons=resultado.get('botones', []),
+                buttons=info.get('botones', []),
                 context=contexto_actualizado or {}
             )
             print(f"✅ Respuesta creada exitosamente")
@@ -1355,7 +1365,79 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
             ],
             context={}
         )
+
+def _log_interaccion_completa_segura(db: Session, conversation: Conversation, mensaje_usuario: str,
+                                   info: Dict[str, Any], button_selected: Optional[str]):
+    """✅ LOGGING SEGURO CON INFORMACIÓN ESTANDARIZADA"""
+    try:
+        # ✅ METADATA SEGURA
+        metadata_raw = {
+            "intencion_detectada": info.get('intencion'),
+            "metodo_procesamiento": info.get('metodo'),
+            "confianza": info.get('confianza'),
+            "sistema_inteligente": True,
+            "claves_estandarizadas": True,
+            "procesamiento_dinamico": True,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # ✅ USAR FUNCIÓN DE LIMPIEZA PARA METADATA
+        metadata_limpio = clean_data_for_json(metadata_raw)
+        metadata_json = safe_json_dumps(metadata_limpio)
+
+        # ✅ LOG CON METADATA SERIALIZADA SEGURA
+        LogService.log_message(
+            db=db,
+            conversation_id=conversation.id,
+            sender_type="system",
+            text_content=info.get('mensaje_respuesta', 'Respuesta procesada'),
+            previous_state=conversation.current_state,
+            next_state=info.get('next_state', conversation.current_state),
+            metadata=metadata_json
+        )
+
+    except Exception as e:
+        print(f"⚠️ Error en logging seguro: {e}")
+        # ✅ FALLBACK MÍNIMO
+        try:
+            LogService.log_message(
+                db=db,
+                conversation_id=conversation.id,
+                sender_type="system",
+                text_content=info.get('mensaje_respuesta', 'Respuesta procesada'),
+                previous_state=conversation.current_state,
+                next_state=info.get('next_state', conversation.current_state)
+            )
+        except Exception as fallback_e:
+            print(f"❌ Error en fallback de logging: {fallback_e}")
+
+def validar_estructura_respuesta(resultado: Dict[str, Any], ubicacion: str = ""):
+    """✅ VALIDADOR PARA DESARROLLO - Verifica que todas las claves estén presentes"""
     
+    claves_requeridas = [
+        'intencion', 'confianza', 'next_state', 'contexto_actualizado',
+        'mensaje_respuesta', 'botones', 'metodo', 'usar_resultado'
+    ]
+    
+    claves_faltantes = []
+    claves_presentes = []
+    
+    for clave in claves_requeridas:
+        if clave in resultado:
+            claves_presentes.append(clave)
+        else:
+            claves_faltantes.append(clave)
+    
+    if claves_faltantes:
+        print(f"⚠️ ADVERTENCIA en {ubicacion}:")
+        print(f"   Claves faltantes: {claves_faltantes}")
+        print(f"   Claves presentes: {claves_presentes}")
+        print(f"   Total claves disponibles: {list(resultado.keys())}")
+        return False
+    else:
+        print(f"✅ Estructura válida en {ubicacion}: todas las claves presentes")
+        return True
+          
 def limpiar_contexto_para_bd(contexto: Dict[str, Any]) -> Dict[str, Any]:
     """Limpia el contexto convirtiendo tipos problemáticos"""
     contexto_limpio = {}
