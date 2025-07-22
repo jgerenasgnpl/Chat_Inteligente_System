@@ -1,3 +1,5 @@
+# app/services/improved_chat_processor.py - VERSIÓN OPTIMIZADA CON TUS SERVICIOS
+
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -9,54 +11,76 @@ logger = logging.getLogger(__name__)
 
 class ImprovedChatProcessor:
     """
-    ✅ PROCESADOR MEJORADO PARA CORREGIR PROBLEMAS:
-    1. Transiciones bloqueadas
-    2. Datos hardcodeados
-    3. Variables mal resueltas
+    ✅ PROCESADOR OPTIMIZADO QUE APROVECHA TUS SERVICIOS EXISTENTES
+    - Integración completa con dynamic_transition_service
+    - Uso inteligente del openai_service (con enhance_response)
+    - Aprovecha variable_service corregido
     """
     
     def __init__(self, db: Session):
         self.db = db
+        # ✅ SERVICIOS EXISTENTES
         self.dynamic_service = self._init_dynamic_service()
         self.variable_service = self._init_variable_service()
-        
+        # ✅ NUEVO: Integrar OpenAI service para mejoras
+        self.openai_service = self._init_openai_service()
+        logger.info("✅ ImprovedChatProcessor optimizado inicializado")
+    
     def _init_dynamic_service(self):
+        """✅ INICIALIZAR TU SERVICIO DINÁMICO EXISTENTE"""
         try:
             from app.services.dynamic_transition_service import create_dynamic_transition_service
-            return create_dynamic_transition_service(self.db)
+            service = create_dynamic_transition_service(self.db)
+            logger.info("✅ Dynamic transition service inicializado")
+            return service
         except Exception as e:
-            logger.error(f"Error inicializando dynamic service: {e}")
+            logger.error(f"❌ Error inicializando dynamic service: {e}")
             return None
     
     def _init_variable_service(self):
+        """✅ INICIALIZAR TU SERVICIO DE VARIABLES EXISTENTE"""
         try:
             from app.services.variable_service import crear_variable_service
-            return crear_variable_service(self.db)
+            service = crear_variable_service(self.db)
+            logger.info("✅ Variable service inicializado")
+            return service
         except Exception as e:
-            logger.error(f"Error inicializando variable service: {e}")
+            logger.error(f"❌ Error inicializando variable service: {e}")
+            return None
+    
+    def _init_openai_service(self):
+        """✅ NUEVO: Inicializar tu OpenAI service existente"""
+        try:
+            from app.services.openai_service import openai_cobranza_service
+            if openai_cobranza_service.disponible:
+                logger.info("✅ OpenAI service disponible para mejoras")
+                return openai_cobranza_service
+            else:
+                logger.info("⚠️ OpenAI service no disponible")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Error inicializando OpenAI service: {e}")
             return None
 
     def process_message_improved(self, mensaje: str, contexto: Dict[str, Any], 
                                 estado_actual: str) -> Dict[str, Any]:
-        """✅ PROCESAMIENTO MEJORADO CON CLAVES ESTANDARIZADAS"""
+        """✅ PROCESAMIENTO OPTIMIZADO CON TUS SERVICIOS EXISTENTES"""
         
         try:
-            logger.info(f"🔄 [IMPROVED] Procesando: '{mensaje}' en '{estado_actual}'")
+            logger.info(f"🔄 [IMPROVED+OPTIMIZED] Procesando: '{mensaje}' en '{estado_actual}'")
             
             # 1. ✅ DETECCIÓN DE CÉDULA (MÁXIMA PRIORIDAD)
             cedula = self._detectar_cedula_robusta(mensaje)
             if cedula:
                 resultado = self._procesar_cedula_mejorada(cedula, contexto)
-                # ✅ ESTANDARIZAR CLAVES
                 return self._estandarizar_respuesta(resultado)
             
-            # 2. ✅ PROCESAMIENTO CON SISTEMA DINÁMICO MEJORADO
+            # 2. ✅ USAR TU SISTEMA DINÁMICO EXISTENTE (OPTIMIZADO)
             if self.dynamic_service:
-                resultado = self._procesar_con_dynamic_service_mejorado(
+                resultado = self._procesar_con_dynamic_service_optimizado(
                     mensaje, contexto, estado_actual
                 )
                 if resultado.get('success'):
-                    # ✅ ESTANDARIZAR CLAVES
                     return self._estandarizar_respuesta(resultado)
             
             # 3. ✅ FALLBACK INTELIGENTE
@@ -64,54 +88,281 @@ class ImprovedChatProcessor:
             return self._estandarizar_respuesta(resultado)
             
         except Exception as e:
-            logger.error(f"❌ Error en procesamiento mejorado: {e}")
+            logger.error(f"❌ Error en procesamiento optimizado: {e}")
             resultado = self._error_response_mejorado(mensaje, contexto, estado_actual)
             return self._estandarizar_respuesta(resultado)
     
-    def _estandarizar_respuesta(self, resultado: Dict[str, Any]) -> Dict[str, Any]:
-        """✅ NUEVO: Estandarizar todas las claves de respuesta"""
+    def _procesar_con_dynamic_service_optimizado(self, mensaje: str, contexto: Dict, 
+                                               estado: str) -> Dict[str, Any]:
+        """✅ APROVECHA COMPLETAMENTE TU SISTEMA DINÁMICO EXISTENTE"""
+        try:
+            # ✅ CREAR ML RESULT MEJORADO
+            ml_result = self._generar_ml_result_inteligente(mensaje)
+            
+            # ✅ USAR TU SISTEMA DINÁMICO COMPLETO
+            transition_result = self.dynamic_service.determine_next_state(
+                current_state=estado,
+                user_message=mensaje,
+                ml_result=ml_result,
+                context=contexto
+            )
+            
+            logger.info(f"🎯 Transición dinámica: {estado} → {transition_result['next_state']}")
+            logger.info(f"🔧 Método dinámico: {transition_result.get('detection_method')}")
+            
+            # ✅ LOGGING AUTOMÁTICO (aprovecha tu función existente)
+            try:
+                conversation_id = contexto.get('conversation_id', 1)
+                self.dynamic_service.log_decision(
+                    conversation_id, estado, mensaje, ml_result, transition_result
+                )
+            except Exception as log_e:
+                logger.warning(f"⚠️ Error en logging automático: {log_e}")
+            
+            # ✅ GENERAR RESPUESTA CON MEJORA OPCIONAL DE IA
+            mensaje_base = self._generar_respuesta_con_variables(
+                transition_result['next_state'], contexto
+            )
+            
+            # ✅ MEJORA OPCIONAL CON TU OPENAI SERVICE
+            mensaje_final = self._mejorar_respuesta_con_openai_si_aplica(
+                mensaje_base, contexto, mensaje, transition_result['next_state']
+            )
+            
+            # ✅ CAPTURAR INFORMACIÓN DEL PLAN
+            contexto_actualizado = self._capturar_plan_inteligente(
+                mensaje, transition_result, contexto
+            )
+            
+            return {
+                'success': True,
+                'next_state': transition_result['next_state'],
+                'context': contexto_actualizado,
+                'message': mensaje_final,
+                'buttons': self._generar_botones_dinamicos(
+                    transition_result['next_state'], contexto_actualizado
+                ),
+                'method': 'dynamic_service_optimized',
+                'transition_info': transition_result,
+                'ai_enhanced': mensaje_final != mensaje_base
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error en sistema dinámico optimizado: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _generar_ml_result_inteligente(self, mensaje: str) -> Dict[str, Any]:
+        """✅ ML RESULT MEJORADO QUE APROVECHA TUS MAPEOS EXISTENTES"""
+        mensaje_lower = mensaje.lower().strip()
         
-        # ✅ MAPEO DE CLAVES PARA COMPATIBILIDAD
-        respuesta_estandar = {
-            'intencion': resultado.get('intention') or resultado.get('intencion', 'PROCESAMIENTO_GENERAL'),
-            'confianza': resultado.get('confidence') or resultado.get('confianza', 0.0),
-            'next_state': resultado.get('next_state') or resultado.get('estado_siguiente', 'inicial'),
-            'contexto_actualizado': resultado.get('context') or resultado.get('contexto_actualizado', {}),
-            'mensaje_respuesta': resultado.get('message') or resultado.get('mensaje_respuesta', '¿En qué puedo ayudarte?'),
-            'botones': resultado.get('buttons') or resultado.get('botones', []),
-            'metodo': resultado.get('method') or resultado.get('metodo', 'sistema_mejorado'),
-            'usar_resultado': resultado.get('success', True),
-            'transition_info': resultado.get('transition_info', {})
+        # ✅ DETECCIÓN MEJORADA BASADA EN TUS MAPEOS ML
+        mappings = [
+            # Selecciones específicas (alta confianza)
+            (['pago unic', 'pago único', 'liquidar', 'primera'], 'SELECCION_PLAN_UNICO', 0.95),
+            (['3 cuotas', 'tres cuotas', 'segunda'], 'PLAN_3_CUOTAS', 0.95),
+            (['6 cuotas', 'seis cuotas', 'tercera'], 'PLAN_6_CUOTAS', 0.95),
+            (['12 cuotas', 'doce cuotas', 'cuarta'], 'PLAN_12_CUOTAS', 0.95),
+            
+            # Confirmaciones (confianza media-alta)
+            (['acepto', 'confirmo', 'de acuerdo', 'está bien'], 'CONFIRMACION_EXITOSA', 0.90),
+            (['si acepto', 'sí acepto', 'acepto el plan'], 'CONFIRMACION_EXITOSA', 0.95),
+            
+            # Consultas proceso de pago
+            (['como pago', 'donde pago', 'métodos de pago'], 'CONSULTA_PROCESO_PAGO', 0.90),
+            
+            # Rechazos y objeciones
+            (['no puedo', 'imposible', 'muy caro'], 'OBJECION', 0.85),
+            (['no me interesa', 'no quiero'], 'RECHAZO', 0.90),
+            
+            # Números simples (confianza media)
+            (['1'], 'SELECCION_PLAN_UNICO', 0.85),
+            (['2'], 'PLAN_3_CUOTAS', 0.85),
+            (['3'], 'PLAN_6_CUOTAS', 0.85),
+            
+            # Confirmaciones simples (confianza baja)
+            (['si', 'sí', 'ok'], 'CONFIRMACION', 0.75),
+        ]
+        
+        # ✅ BUSCAR COINCIDENCIA CON MAYOR CONFIANZA
+        for keywords, intention, confidence in mappings:
+            if any(keyword in mensaje_lower for keyword in keywords):
+                return {
+                    "intention": intention,
+                    "confidence": confidence,
+                    "method": "intelligent_mapping",
+                    "matched_keywords": [kw for kw in keywords if kw in mensaje_lower]
+                }
+        
+        # ✅ FALLBACK PARA MENSAJES GENERALES
+        if len(mensaje.strip()) > 5:
+            return {"intention": "MENSAJE_GENERAL", "confidence": 0.6, "method": "fallback"}
+        else:
+            return {"intention": "ENTRADA_SIMPLE", "confidence": 0.4, "method": "fallback"}
+    
+    def _generar_respuesta_con_variables(self, estado: str, contexto: Dict) -> str:
+        """✅ GENERAR RESPUESTA USANDO TU VARIABLE SERVICE"""
+        try:
+            # ✅ OBTENER TEMPLATE DESDE BD (TU MÉTODO EXISTENTE)
+            query = text("""
+                SELECT mensaje_template 
+                FROM Estados_Conversacion 
+                WHERE nombre = :estado AND activo = 1
+            """)
+            
+            result = self.db.execute(query, {"estado": estado}).fetchone()
+            
+            if result and result[0]:
+                template = result[0]
+                
+                # ✅ USAR TU SERVICIO DE VARIABLES EXISTENTE
+                if self.variable_service and contexto.get('cliente_encontrado'):
+                    try:
+                        mensaje_resuelto = self.variable_service.resolver_variables(template, contexto)
+                        logger.info(f"✅ Variables resueltas con tu servicio existente")
+                        return mensaje_resuelto
+                    except Exception as e:
+                        logger.error(f"Error resolviendo variables: {e}")
+                        return self._limpiar_template_fallback(template, contexto)
+                else:
+                    return self._limpiar_template_fallback(template, contexto)
+            else:
+                return self._generar_mensaje_fallback(estado, contexto)
+                
+        except Exception as e:
+            logger.error(f"❌ Error generando respuesta: {e}")
+            return "¿En qué más puedo ayudarte?"
+    
+    def _mejorar_respuesta_con_openai_si_aplica(self, mensaje_base: str, contexto: Dict,
+                                              user_message: str, estado: str) -> str:
+        """✅ USAR TU OPENAI SERVICE EXISTENTE PARA MEJORAS OPCIONALES"""
+        
+        # ✅ VERIFICAR SI TU OPENAI SERVICE ESTÁ DISPONIBLE
+        if not self.openai_service or not self.openai_service.disponible:
+            return mensaje_base
+        
+        # ✅ USAR TU MÉTODO should_use_openai EXISTENTE
+        if not self.openai_service.should_use_openai(user_message, contexto, estado):
+            return mensaje_base
+        
+        try:
+            # ✅ CREAR PROMPT ESPECÍFICO PARA TU enhance_response
+            enhancement_prompt = f"""
+            CONTEXTO DE MEJORA:
+            Estado: {estado}
+            Mensaje del cliente: {user_message}
+            Cliente: {contexto.get('Nombre_del_cliente', 'Cliente')}
+            Saldo: ${contexto.get('saldo_total', 0):,}
+            
+            RESPUESTA BASE:
+            {mensaje_base}
+            
+            Mejora esta respuesta manteniéndola empática y profesional.
+            Incluye datos específicos del cliente cuando sea relevante.
+            Máximo 200 palabras.
+            """
+            
+            # ✅ USAR TU MÉTODO enhance_response EXISTENTE
+            respuesta_mejorada = self.openai_service.enhance_response(
+                enhancement_prompt, contexto
+            )
+            
+            if respuesta_mejorada and len(respuesta_mejorada) > 10:
+                logger.info(f"✅ Respuesta mejorada con tu OpenAI service")
+                return respuesta_mejorada
+            
+        except Exception as e:
+            logger.error(f"❌ Error mejorando con OpenAI: {e}")
+        
+        return mensaje_base
+    
+    def _capturar_plan_inteligente(self, mensaje: str, transition_result: Dict, 
+                                  contexto: Dict) -> Dict[str, Any]:
+        """✅ CAPTURA DE PLAN MEJORADA"""
+        
+        contexto_actualizado = contexto.copy()
+        
+        # ✅ VERIFICAR CONDICIONES DE TU SISTEMA DINÁMICO
+        condicion = transition_result.get('condition_detected', '')
+        
+        # ✅ MAPEO DE CONDICIONES A PLANES
+        plan_mappings = {
+            'cliente_selecciona_pago_unico': self._crear_plan_pago_unico,
+            'cliente_selecciona_plan_3_cuotas': lambda ctx: self._crear_plan_cuotas(ctx, 3),
+            'cliente_selecciona_plan_6_cuotas': lambda ctx: self._crear_plan_cuotas(ctx, 6),
+            'cliente_selecciona_plan_12_cuotas': lambda ctx: self._crear_plan_cuotas(ctx, 12),
         }
         
-        # ✅ VALIDAR QUE TODAS LAS CLAVES REQUERIDAS EXISTAN
-        claves_requeridas = ['intencion', 'confianza', 'next_state', 'contexto_actualizado', 
-                           'mensaje_respuesta', 'botones', 'metodo', 'usar_resultado']
+        if condicion in plan_mappings:
+            try:
+                plan_info = plan_mappings[condicion](contexto)
+                if plan_info:
+                    contexto_actualizado.update(plan_info)
+                    logger.info(f"✅ Plan inteligente capturado: {plan_info.get('plan_seleccionado')}")
+            except Exception as e:
+                logger.error(f"❌ Error capturando plan: {e}")
         
-        for clave in claves_requeridas:
-            if clave not in respuesta_estandar or respuesta_estandar[clave] is None:
-                # ✅ VALORES FALLBACK DINÁMICOS
-                respuesta_estandar[clave] = self._get_valor_fallback(clave, resultado)
-        
-        logger.info(f"✅ Respuesta estandarizada con todas las claves requeridas")
-        return respuesta_estandar
+        return contexto_actualizado
     
-    def _get_valor_fallback(self, clave: str, resultado_original: Dict) -> Any:
-        """✅ VALORES FALLBACK DINÁMICOS (NO HARDCODEADOS)"""
+    def _crear_plan_pago_unico(self, contexto: Dict) -> Dict[str, Any]:
+        """✅ CREAR PLAN PAGO ÚNICO CON DATOS REALES"""
+        saldo = contexto.get('saldo_total', 0)
+        oferta_2 = contexto.get('oferta_2', 0)
+        nombre = contexto.get('Nombre_del_cliente', 'Cliente')
         
-        fallbacks = {
-            'intencion': 'PROCESAMIENTO_GENERAL',
-            'confianza': 0.5,
-            'next_state': 'inicial',
-            'contexto_actualizado': {},
-            'mensaje_respuesta': 'Para ayudarte, necesito tu número de cédula.',
-            'botones': [{'id': 'ayuda', 'text': 'Necesito ayuda'}],
-            'metodo': 'fallback_automatico',
-            'usar_resultado': True
+        if saldo <= 0:
+            return {}
+        
+        # ✅ USAR OFERTA REAL O CALCULAR
+        monto_final = oferta_2 if oferta_2 > 0 else int(saldo * 0.7)
+        descuento = saldo - monto_final
+        porcentaje_desc = int((descuento / saldo) * 100) if saldo > 0 else 0
+        
+        return {
+            'plan_capturado': True,
+            'plan_seleccionado': 'Pago único con descuento',
+            'tipo_plan': 'pago_unico',
+            'monto_acordado': monto_final,
+            'numero_cuotas': 1,
+            'valor_cuota': monto_final,
+            'descuento_aplicado': descuento,
+            'porcentaje_descuento': porcentaje_desc,
+            'fecha_limite': (datetime.now() + timedelta(days=30)).strftime("%d de %B de %Y"),
+            'metodo_captura': 'inteligente_dinamico'
         }
-        
-        return fallbacks.get(clave, None)
     
+    def _crear_plan_cuotas(self, contexto: Dict, num_cuotas: int) -> Dict[str, Any]:
+        """✅ CREAR PLAN DE CUOTAS CON DATOS REALES"""
+        saldo = contexto.get('saldo_total', 0)
+        
+        # ✅ OBTENER VALOR DE CUOTA DESDE CONTEXTO
+        campo_cuota = f'hasta_{num_cuotas}_cuotas'
+        valor_cuota = contexto.get(campo_cuota, 0)
+        
+        if saldo <= 0:
+            return {}
+        
+        # ✅ USAR VALOR REAL O CALCULAR
+        if valor_cuota <= 0:
+            # Calcular con descuento progresivo
+            factor_descuento = 1.0 - (num_cuotas / 100)  # Más cuotas = menos descuento
+            valor_cuota = int((saldo * factor_descuento) / num_cuotas)
+        
+        monto_total = valor_cuota * num_cuotas
+        descuento = saldo - monto_total
+        
+        return {
+            'plan_capturado': True,
+            'plan_seleccionado': f'Plan {num_cuotas} cuotas sin interés',
+            'tipo_plan': f'cuotas_{num_cuotas}',
+            'monto_acordado': monto_total,
+            'numero_cuotas': num_cuotas,
+            'valor_cuota': valor_cuota,
+            'descuento_aplicado': descuento,
+            'fecha_limite': (datetime.now() + timedelta(days=30)).strftime("%d de %B de %Y"),
+            'metodo_captura': 'inteligente_dinamico'
+        }
+    
+    # ✅ MÉTODOS HEREDADOS (sin cambios significativos)
     def _detectar_cedula_robusta(self, mensaje: str) -> Optional[str]:
         """✅ DETECCIÓN ROBUSTA DE CÉDULAS"""
         patrones = [
@@ -129,35 +380,12 @@ class ImprovedChatProcessor:
                     return match
         return None
     
-    def _generar_mensaje_cliente_encontrado(self, cliente_data: Dict) -> str:
-        """✅ GENERAR MENSAJE CUANDO SE ENCUENTRA CLIENTE"""
-        nombre = cliente_data.get('Nombre_del_cliente', 'Cliente')
-        banco = cliente_data.get('banco', 'tu entidad financiera')
-        saldo = cliente_data.get('saldo_total', 0)
-        
-        return f"""¡Perfecto, {nombre}! 
-
-📋 **Información de tu cuenta:**
-🏦 Entidad: {banco}
-💰 Saldo actual: ${saldo:,}
-
-¿Te gustaría conocer las opciones de pago disponibles para ti?"""
-
-    def _generar_botones_cliente_encontrado(self) -> list:
-        """✅ BOTONES PARA CLIENTE ENCONTRADO"""
-        return [
-            {'id': 'ver_opciones', 'text': 'Ver opciones de pago'},
-            {'id': 'mas_info', 'text': 'Más información'},
-            {'id': 'no_ahora', 'text': 'No por ahora'}
-        ]
-
     def _procesar_cedula_mejorada(self, cedula: str, contexto: Dict) -> Dict[str, Any]:
         """✅ PROCESAMIENTO MEJORADO DE CÉDULA"""
         try:
             cliente_data = self._consultar_cliente_real(cedula)
             
             if cliente_data.get('encontrado'):
-                # ✅ CONTEXTO LIMPIO SIN DATOS HARDCODEADOS
                 nuevo_contexto = {
                     **contexto,
                     **cliente_data,
@@ -206,7 +434,6 @@ class ImprovedChatProcessor:
             result = self.db.execute(query, {"cedula": str(cedula)}).fetchone()
             
             if result:
-                # ✅ SOLO DATOS REALES - SIN HARDCODING
                 return {
                     'encontrado': True,
                     'cliente_encontrado': True,
@@ -227,232 +454,38 @@ class ImprovedChatProcessor:
             logger.error(f"❌ Error consultando cliente: {e}")
             return {'encontrado': False}
     
-    def _procesar_con_dynamic_service_mejorado(self, mensaje: str, contexto: Dict, 
-                                              estado: str) -> Dict[str, Any]:
-        """✅ PROCESAMIENTO CON SISTEMA DINÁMICO MEJORADO"""
-        try:
-            # ✅ CREAR ML RESULT
-            ml_result = self._generar_ml_result(mensaje)
-            
-            # ✅ USAR SISTEMA DINÁMICO
-            transition_result = self.dynamic_service.determine_next_state(
-                current_state=estado,
-                user_message=mensaje,
-                ml_result=ml_result,
-                context=contexto
-            )
-            
-            logger.info(f"🎯 Transición: {estado} → {transition_result['next_state']}")
-            logger.info(f"🔧 Método: {transition_result.get('detection_method')}")
-            
-            # ✅ VERIFICAR QUE LA TRANSICIÓN SEA VÁLIDA
-            if transition_result['next_state'] == estado and estado == 'proponer_planes_pago':
-                # ✅ FORZAR TRANSICIÓN SI DETECTA SELECCIÓN
-                if self._detecta_seleccion_plan(mensaje):
-                    logger.info(f"🔧 Forzando transición por selección detectada")
-                    transition_result['next_state'] = 'confirmar_plan_elegido'
-                    transition_result['condition_detected'] = 'cliente_selecciona_plan'
-            
-            # ✅ GENERAR RESPUESTA CON VARIABLES CORRECTAS
-            mensaje_respuesta = self._generar_respuesta_mejorada(
-                transition_result['next_state'], contexto
-            )
-            
-            # ✅ CAPTURAR INFORMACIÓN DEL PLAN
-            contexto_actualizado = self._capturar_plan_si_aplica(
-                mensaje, transition_result, contexto
-            )
-            
-            return {
-                'success': True,
-                'next_state': transition_result['next_state'],
-                'context': contexto_actualizado,
-                'message': mensaje_respuesta,
-                'buttons': self._generar_botones_dinamicos(
-                    transition_result['next_state'], contexto_actualizado
-                ),
-                'method': 'dynamic_service_improved',
-                'transition_info': transition_result
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ Error en dynamic service: {e}")
-            return {'success': False, 'error': str(e)}
+    def _estandarizar_respuesta(self, resultado: Dict[str, Any]) -> Dict[str, Any]:
+        """✅ ESTANDARIZAR TODAS LAS CLAVES DE RESPUESTA"""
+        respuesta_estandar = {
+            'intencion': resultado.get('intention') or resultado.get('intencion', 'PROCESAMIENTO_GENERAL'),
+            'confianza': resultado.get('confidence') or resultado.get('confianza', 0.0),
+            'next_state': resultado.get('next_state') or resultado.get('estado_siguiente', 'inicial'),
+            'contexto_actualizado': resultado.get('context') or resultado.get('contexto_actualizado', {}),
+            'mensaje_respuesta': resultado.get('message') or resultado.get('mensaje_respuesta', '¿En qué puedo ayudarte?'),
+            'botones': resultado.get('buttons') or resultado.get('botones', []),
+            'metodo': resultado.get('method') or resultado.get('metodo', 'sistema_optimizado'),
+            'usar_resultado': resultado.get('success', True),
+            'transition_info': resultado.get('transition_info', {}),
+            'ai_enhanced': resultado.get('ai_enhanced', False)
+        }
+        
+        return respuesta_estandar
     
-    def _detecta_seleccion_plan(self, mensaje: str) -> bool:
-        """✅ DETECTAR SELECCIÓN DE PLAN"""
-        mensaje_lower = mensaje.lower()
-        patrones_seleccion = [
-            'pago unico', 'pago único', 'primera', 'acepto',
-            '3 cuotas', 'segunda', '6 cuotas', 'tercera',
-            '1', '2', '3', 'plan'
-        ]
-        return any(patron in mensaje_lower for patron in patrones_seleccion)
-    
-    def _generar_ml_result(self, mensaje: str) -> Dict[str, Any]:
-        """✅ GENERAR RESULTADO ML"""
-        mensaje_lower = mensaje.lower()
+    # ✅ MÉTODOS AUXILIARES SIMPLIFICADOS
+    def _generar_mensaje_cliente_encontrado(self, cliente_data: Dict) -> str:
+        nombre = cliente_data.get('Nombre_del_cliente', 'Cliente')
+        banco = cliente_data.get('banco', 'tu entidad financiera')
+        saldo = cliente_data.get('saldo_total', 0)
         
-        if any(word in mensaje_lower for word in ['pago unic', 'primera', 'liquidar']):
-            return {"intention": "SELECCION_PLAN_UNICO", "confidence": 0.9}
-        elif any(word in mensaje_lower for word in ['acepto', 'confirmo', 'está bien']):
-            return {"intention": "CONFIRMACION_EXITOSA", "confidence": 0.9}
-        elif any(word in mensaje_lower for word in ['3 cuotas', 'segunda']):
-            return {"intention": "PLAN_3_CUOTAS", "confidence": 0.9}
-        elif any(word in mensaje_lower for word in ['6 cuotas', 'tercera']):
-            return {"intention": "PLAN_6_CUOTAS", "confidence": 0.9}
-        elif any(word in mensaje_lower for word in ['si', 'sí', 'quiero', 'opciones']):
-            return {"intention": "CONFIRMACION", "confidence": 0.8}
-        else:
-            return {"intention": "MENSAJE_GENERAL", "confidence": 0.5}
-    
-    def _generar_respuesta_mejorada(self, estado: str, contexto: Dict) -> str:
-        """✅ GENERAR RESPUESTA SIN DATOS HARDCODEADOS"""
-        try:
-            # ✅ OBTENER TEMPLATE DESDE BD
-            query = text("""
-                SELECT mensaje_template 
-                FROM Estados_Conversacion 
-                WHERE nombre = :estado AND activo = 1
-            """)
-            
-            result = self.db.execute(query, {"estado": estado}).fetchone()
-            
-            if result and result[0]:
-                template = result[0]
-                
-                # ✅ RESOLVER VARIABLES CON DATOS REALES ÚNICAMENTE
-                if self.variable_service and contexto.get('cliente_encontrado'):
-                    try:
-                        mensaje_final = self.variable_service.resolver_variables(template, contexto)
-                        return mensaje_final
-                    except Exception as e:
-                        logger.error(f"Error resolviendo variables: {e}")
-                        return self._limpiar_template_sin_datos(template, contexto)
-                else:
-                    return self._limpiar_template_sin_datos(template, contexto)
-            else:
-                # ✅ FALLBACK SIN HARDCODING
-                return self._generar_mensaje_fallback(estado, contexto)
-                
-        except Exception as e:
-            logger.error(f"❌ Error generando respuesta: {e}")
-            return "¿En qué más puedo ayudarte?"
-    
-    def _limpiar_template_sin_datos(self, template: str, contexto: Dict) -> str:
-        """✅ LIMPIAR TEMPLATE CUANDO NO HAY DATOS REALES"""
-        
-        nombre = contexto.get('Nombre_del_cliente', 'Cliente')
-        
-        # ✅ REEMPLAZAR VARIABLES BÁSICAS
-        template_limpio = template.replace('{{Nombre_del_cliente}}', nombre)
-        template_limpio = template_limpio.replace('{{nombre_cliente}}', nombre)
-        
-        # ✅ ELIMINAR VARIABLES MONETARIAS SIN DATOS
-        patron_monetario = r'\{\{[^}]*(?:saldo|oferta|cuota|pago)[^}]*\}\}'
-        template_limpio = re.sub(patron_monetario, '', template_limpio)
-        
-        # ✅ ELIMINAR LÍNEAS VACÍAS RESULTANTES
-        lineas = template_limpio.split('\n')
-        lineas_limpias = [linea.strip() for linea in lineas if linea.strip() and not re.match(r'^[\$\s:]+$', linea.strip())]
-        
-        resultado = '\n'.join(lineas_limpias)
-        
-        # ✅ SI QUEDA VACÍO, MENSAJE GENÉRICO
-        if not resultado.strip():
-            if contexto.get('cliente_encontrado'):
-                return f"¿En qué puedo ayudarte, {nombre}?"
-            else:
-                return "Para ayudarte, necesito tu número de cédula."
-        
-        return resultado
-    
-    def _capturar_plan_si_aplica(self, mensaje: str, transition_result: Dict, 
-                                contexto: Dict) -> Dict[str, Any]:
-        """✅ CAPTURAR INFORMACIÓN DEL PLAN SELECCIONADO"""
-        
-        contexto_actualizado = contexto.copy()
-        
-        # ✅ SI HAY CONDICIÓN DE SELECCIÓN DE PLAN
-        condicion = transition_result.get('condition_detected', '')
-        if 'cliente_selecciona_plan' in condicion:
-            
-            plan_info = self._determinar_plan_por_mensaje(mensaje, contexto)
-            if plan_info:
-                contexto_actualizado.update(plan_info)
-                logger.info(f"✅ Plan capturado: {plan_info.get('plan_seleccionado')}")
-        
-        return contexto_actualizado
-    
-    def _determinar_plan_por_mensaje(self, mensaje: str, contexto: Dict) -> Dict[str, Any]:
-        """✅ DETERMINAR PLAN ESPECÍFICO POR MENSAJE"""
-        
-        mensaje_lower = mensaje.lower()
-        saldo = contexto.get('saldo_total', 0)
-        oferta_2 = contexto.get('oferta_2', 0)
-        cuotas_3 = contexto.get('hasta_3_cuotas', 0)
-        cuotas_6 = contexto.get('hasta_6_cuotas', 0)
-        
-        # ✅ SOLO PROCESAR SI HAY DATOS REALES
-        if saldo <= 0:
-            return {}
-        
-        fecha_limite = (datetime.now() + timedelta(days=30)).strftime("%d de %B de %Y")
-        
-        if any(word in mensaje_lower for word in ['pago unic', 'primera', 'liquidar', '1']):
-            if oferta_2 > 0:
-                return {
-                    'plan_seleccionado': 'Pago único con descuento',
-                    'monto_acordado': oferta_2,
-                    'numero_cuotas': 1,
-                    'valor_cuota': oferta_2,
-                    'fecha_limite': fecha_limite,
-                    'plan_capturado': True
-                }
-        
-        elif any(word in mensaje_lower for word in ['3 cuotas', 'segunda', 'tres', '2']):
-            if cuotas_3 > 0:
-                return {
-                    'plan_seleccionado': 'Plan 3 cuotas sin interés',
-                    'monto_acordado': cuotas_3 * 3,
-                    'numero_cuotas': 3,
-                    'valor_cuota': cuotas_3,
-                    'fecha_limite': fecha_limite,
-                    'plan_capturado': True
-                }
-        
-        elif any(word in mensaje_lower for word in ['6 cuotas', 'tercera', 'seis', '3']):
-            if cuotas_6 > 0:
-                return {
-                    'plan_seleccionado': 'Plan 6 cuotas sin interés',
-                    'monto_acordado': cuotas_6 * 6,
-                    'numero_cuotas': 6,
-                    'valor_cuota': cuotas_6,
-                    'fecha_limite': fecha_limite,
-                    'plan_capturado': True
-                }
-        
-        return {}
-    
-    def _generar_mensaje_fallback(self, estado: str, contexto: Dict) -> str:
-        """✅ MENSAJE FALLBACK SIN HARDCODING"""
-        
-        tiene_cliente = contexto.get('cliente_encontrado', False)
-        nombre = contexto.get('Nombre_del_cliente', 'Cliente')
-        
-        if estado == 'informar_deuda' and tiene_cliente:
-            return f"Hola {nombre}, ¿te gustaría conocer las opciones de pago disponibles?"
-        elif estado == 'proponer_planes_pago' and tiene_cliente:
-            return f"Te puedo ofrecer diferentes planes de pago, {nombre}. ¿Cuál te interesa más?"
-        elif estado == 'confirmar_plan_elegido' and tiene_cliente:
-            return f"¿Confirmas el plan que elegiste, {nombre}?"
-        elif tiene_cliente:
-            return f"¿En qué más puedo ayudarte, {nombre}?"
-        else:
-            return "Para ayudarte, necesito tu número de cédula."
-    
+        return f"""¡Perfecto, {nombre}! 
+
+📋 **Información de tu cuenta:**
+🏦 Entidad: {banco}
+💰 Saldo actual: ${saldo:,}
+
+¿Te gustaría conocer las opciones de pago disponibles para ti?"""
+
     def _generar_botones_cliente_encontrado(self) -> list:
-        """✅ BOTONES PARA CLIENTE ENCONTRADO"""
         return [
             {'id': 'ver_opciones', 'text': 'Ver opciones de pago'},
             {'id': 'mas_info', 'text': 'Más información'},
@@ -460,8 +493,6 @@ class ImprovedChatProcessor:
         ]
     
     def _generar_botones_dinamicos(self, estado: str, contexto: Dict) -> list:
-        """✅ BOTONES DINÁMICOS POR ESTADO"""
-        
         if estado == 'proponer_planes_pago':
             return [
                 {'id': 'pago_unico', 'text': 'Pago único con descuento'},
@@ -471,8 +502,7 @@ class ImprovedChatProcessor:
         elif estado == 'confirmar_plan_elegido':
             return [
                 {'id': 'confirmar_acuerdo', 'text': 'Sí, confirmo'},
-                {'id': 'cambiar_plan', 'text': 'Cambiar plan'},
-                {'id': 'mas_info', 'text': 'Más información'}
+                {'id': 'cambiar_plan', 'text': 'Cambiar plan'}
             ]
         elif estado == 'generar_acuerdo':
             return [
@@ -482,47 +512,35 @@ class ImprovedChatProcessor:
         else:
             return [{'id': 'ayuda', 'text': 'Necesito ayuda'}]
     
-    def _fallback_mejorado(self, mensaje: str, contexto: Dict, estado: str) -> Dict[str, Any]:
-        """✅ FALLBACK MEJORADO"""
-        
-        mensaje_lower = mensaje.lower()
-        tiene_cliente = contexto.get('cliente_encontrado', False)
+    def _limpiar_template_fallback(self, template: str, contexto: Dict) -> str:
         nombre = contexto.get('Nombre_del_cliente', 'Cliente')
+        template_limpio = template.replace('{{Nombre_del_cliente}}', nombre)
+        patron_monetario = r'\{\{[^}]*(?:saldo|oferta|cuota|pago)[^}]*\}\}'
+        template_limpio = re.sub(patron_monetario, '', template_limpio)
         
-        # ✅ CONFIRMACIONES SIMPLES
-        if any(word in mensaje_lower for word in ['si', 'sí', 'acepto']):
-            if estado == 'informar_deuda':
-                return {
-                    'success': True,
-                    'next_state': 'proponer_planes_pago',
-                    'context': contexto,
-                    'message': f"Perfecto {nombre}, estas son tus opciones de pago.",
-                    'buttons': self._generar_botones_dinamicos('proponer_planes_pago', contexto),
-                    'method': 'fallback_confirmacion'
-                }
+        if not template_limpio.strip():
+            return f"¿En qué puedo ayudarte, {nombre}?" if nombre != 'Cliente' else "Para ayudarte, necesito tu cédula."
         
-        # ✅ FALLBACK GENÉRICO
-        if tiene_cliente:
-            mensaje_respuesta = f"¿Puedes ser más específico, {nombre}? Estoy aquí para ayudarte."
-            botones = [
-                {'id': 'opciones_pago', 'text': 'Ver opciones de pago'},
-                {'id': 'asesor', 'text': 'Hablar con asesor'}
-            ]
+        return template_limpio
+    
+    def _generar_mensaje_fallback(self, estado: str, contexto: Dict) -> str:
+        nombre = contexto.get('Nombre_del_cliente', 'Cliente')
+        if contexto.get('cliente_encontrado'):
+            return f"¿En qué más puedo ayudarte, {nombre}?"
         else:
-            mensaje_respuesta = "Para ayudarte mejor, necesito tu número de cédula."
-            botones = [{'id': 'proporcionar_cedula', 'text': 'Proporcionar cédula'}]
-        
+            return "Para ayudarte, necesito tu número de cédula."
+    
+    def _fallback_mejorado(self, mensaje: str, contexto: Dict, estado: str) -> Dict[str, Any]:
         return {
             'success': True,
             'next_state': estado,
             'context': contexto,
-            'message': mensaje_respuesta,
-            'buttons': botones,
-            'method': 'fallback_mejorado'
+            'message': self._generar_mensaje_fallback(estado, contexto),
+            'buttons': [{'id': 'ayuda', 'text': 'Necesito ayuda'}],
+            'method': 'fallback_optimizado'
         }
     
     def _error_response_mejorado(self, mensaje: str, contexto: Dict, estado: str) -> Dict[str, Any]:
-        """✅ RESPUESTA DE ERROR MEJORADA"""
         return {
             'success': True,
             'next_state': 'inicial',
@@ -532,6 +550,17 @@ class ImprovedChatProcessor:
             'method': 'error_recovery'
         }
 
-# ✅ FACTORY FUNCTION
+# ✅ FACTORY FUNCTIONS OPTIMIZADAS
 def create_improved_chat_processor(db: Session) -> ImprovedChatProcessor:
-    return ImprovedChatProcessor(db)
+    """Factory optimizada que aprovecha tus servicios existentes"""
+    try:
+        processor = ImprovedChatProcessor(db)
+        logger.info("✅ ImprovedChatProcessor optimizado creado exitosamente")
+        return processor
+    except Exception as e:
+        logger.error(f"❌ Error creando ImprovedChatProcessor optimizado: {e}")
+        raise
+
+def create_compatible_chat_processor(db: Session) -> ImprovedChatProcessor:
+    """Alias para compatibilidad"""
+    return create_improved_chat_processor(db)

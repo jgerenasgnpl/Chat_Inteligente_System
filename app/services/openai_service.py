@@ -184,6 +184,61 @@ Genera un mensaje de seguimiento profesional."""
         print(f"   📚 Docs: https://platform.openai.com/docs")
         print()
     
+    def enhance_response(self, enhancement_prompt: str, context: Dict[str, Any]) -> Optional[str]:
+        """✅ NUEVO: Mejorar respuesta específica con IA"""
+        
+        try:
+            if not self.disponible:
+                return None
+            
+            # ✅ MENSAJE ESPECÍFICO PARA MEJORA DE RESPUESTAS
+            messages = [
+                {
+                    "role": "system",
+                    "content": """Eres un asistente especializado en mejorar respuestas de sistemas de cobranza.
+                    
+                    OBJETIVOS:
+                    - Hacer las respuestas más empáticas y profesionales
+                    - Incluir información específica del cliente cuando sea relevante
+                    - Mantener el tono de negociación de deudas
+                    - Ser conciso pero completo
+                    - Usar emojis apropiados para el contexto
+                    
+                    RESTRICCIONES:
+                    - NO inventar información que no esté en el contexto
+                    - NO cambiar números, fechas o datos específicos
+                    - Máximo 200 palabras
+                    - Mantener estructura similar a la respuesta base"""
+                },
+                {
+                    "role": "user", 
+                    "content": enhancement_prompt
+                }
+            ]
+            
+            # ✅ LLAMADA OPTIMIZADA PARA MEJORA
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",  # Modelo más económico para mejoras
+                messages=messages,
+                max_tokens=300,  # Respuestas cortas
+                temperature=0.7,  # Algo de creatividad pero controlada
+                timeout=10  # Timeout corto
+            )
+            
+            enhanced_text = response.choices[0].message.content.strip()
+            
+            # ✅ VALIDAR RESPUESTA MEJORADA
+            if enhanced_text and len(enhanced_text) > 10:
+                self._record_usage("response_enhancement", True)
+                return enhanced_text
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ Error mejorando respuesta: {e}")
+            self._record_usage("response_enhancement", False)
+            return None
+
     def should_use_openai(self, mensaje: str, contexto: Dict[str, Any], estado: str) -> bool:
         """
         ✅ DECISOR INTELIGENTE - 80% de uso en casos relevantes
