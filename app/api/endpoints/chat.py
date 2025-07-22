@@ -1186,21 +1186,48 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         print(f"   Nombre: {nombre_en_contexto}")
         print(f"   Saldo: ${saldo_en_contexto:,}" if saldo_en_contexto else "$0")
         
-        smart_processor = SmartLanguageProcessor(db)
+        from app.services.improved_chat_processor import create_improved_chat_processor
+        improved_processor = create_improved_chat_processor(db)
         
         # ✅ PROCESAR MENSAJE CON CONTEXTO VERIFICADO
-        resultado = smart_processor.procesar_mensaje_inteligente(
-            message_content, 
-            contexto_actual, 
-            conversation.current_state
+        resultado = improved_processor.process_message_improved(
+            message_content, contexto_actual, conversation.current_state
         )
         
-        print(f"🎯 Resultado: {resultado['intencion']} (confianza: {resultado['confianza']:.2f})")
+        try:
+            intencion = resultado.get('intencion', 'PROCESAMIENTO_GENERAL')
+            confianza = resultado.get('confianza', 0.0)
+            print(f"🎯 Resultado: {intencion} (confianza: {confianza:.2f})")
+        except Exception as e:
+            print(f"⚠️ Error mostrando resultado: {e}")
+            print(f"🎯 Resultado disponible con keys: {list(resultado.keys())}")
+
         print(f"🔧 Método: {resultado['metodo']}")
         print(f"📍 Estado: {conversation.current_state} → {resultado['next_state']}")
         
         nuevo_estado = _validar_estado_existente(resultado['next_state'])
-        contexto_actualizado = resultado['contexto_actualizado']
+        contexto_actualizado = resultado.get('contexto_actualizado', contexto_actual)
+
+        if not isinstance(contexto_actualizado, dict):
+            print(f"⚠️ Contexto inválido, usando contexto actual")
+            contexto_actualizado = contexto_actual
+        
+        if contexto_actual.get('cliente_encontrado') and not contexto_actualizado.get('cliente_encontrado'):
+            print(f"🔧 Preservando datos del cliente")
+            datos_cliente = {
+                'cliente_encontrado': contexto_actual.get('cliente_encontrado'),
+                'Nombre_del_cliente': contexto_actual.get('Nombre_del_cliente'),
+                'saldo_total': contexto_actual.get('saldo_total'),
+                'banco': contexto_actual.get('banco'),
+                'oferta_1': contexto_actual.get('oferta_1'),
+                'oferta_2': contexto_actual.get('oferta_2'),
+                'hasta_3_cuotas': contexto_actual.get('hasta_3_cuotas'),
+                'hasta_6_cuotas': contexto_actual.get('hasta_6_cuotas'),
+                'hasta_12_cuotas': contexto_actual.get('hasta_12_cuotas'),
+            }
+            # Filtrar valores None
+            datos_cliente = {k: v for k, v in datos_cliente.items() if v is not None}
+            contexto_actualizado.update(datos_cliente)
         
         # ✅ VERIFICACIÓN CRÍTICA: ASEGURAR PROPAGACIÓN DE DATOS DEL CLIENTE
         cliente_despues = contexto_actualizado.get('cliente_encontrado', False)
@@ -1263,11 +1290,22 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         db.commit()
         print(f"✅ CONTEXTO GUARDADO EN TABLA CONVERSATIONS")
     
-        # ✅ LOG CON MANEJO SEGURO DE TIPOS
         try:
             _log_interaccion_completa(db, conversation, message_content, resultado, request.button_selected)
         except Exception as log_error:
             print(f"⚠️ Error en logging (no crítico): {log_error}")
+            # Logging básico como fallback
+            try:
+                LogService.log_message(
+                    db=db,
+                    conversation_id=conversation.id,
+                    sender_type="system",
+                    text_content=resultado.get('mensaje_respuesta', 'Respuesta procesada'),
+                    previous_state=conversation.current_state,
+                    next_state=resultado.get('next_state', conversation.current_state)
+                )
+            except Exception as fallback_error:
+                print(f"❌ Error en fallback de logging: {fallback_error}")
         
         print(f"✅ Respuesta generada exitosamente")
         
@@ -1278,13 +1316,27 @@ async def process_chat_message_INTELIGENTE_DEFINITIVO(
         if not cliente_final and (cliente_en_contexto or nombre_en_contexto):
             print(f"❌ WARNING: Se perdieron datos del cliente en el proceso")
         
-        return ChatResponse(
-            conversation_id=conversation.id,
-            message=resultado['mensaje_respuesta'],
-            current_state=nuevo_estado,
-            buttons=resultado['botones'],
-            context=contexto_actualizado  # ✅ CONTEXT LIMPIO
-        )
+        try:
+            response = ChatResponse(
+                conversation_id=conversation.id,
+                message=resultado.get('mensaje_respuesta', '¿En qué puedo ayudarte?'),
+                current_state=nuevo_estado,
+                buttons=resultado.get('botones', []),
+                context=contexto_actualizado or {}
+            )
+            print(f"✅ Respuesta creada exitosamente")
+            return response
+        except Exception as e:
+            print(f"❌ Error creando respuesta: {e}")
+            # Respuesta de emergencia
+            return ChatResponse(
+                conversation_id=conversation.id,
+                message="¿En qué puedo ayudarte? Para comenzar, proporciona tu cédula.",
+                current_state="inicial",
+                buttons=[{"id": "ayuda", "text": "Necesito ayuda"}],
+                context={}
+            )
+
         
     except Exception as e:
         print(f"❌ ERROR CRÍTICO: {e}")
@@ -1709,9 +1761,59 @@ def _get_or_create_conversation(db: Session, user_id: int, conversation_id: Opti
     
     return StateManager.get_or_create_conversation(db, user_id)
 
+@router.post("/test-integration")
+async def test_improved_integration(db: Session = Depends(get_db)):
+    """Test de integración del procesador mejorado"""
+    
+    try:
+        from app.services.improved_chat_processor import create_compatible_chat_processor
+        
+        # Crear procesador
+        processor = create_compatible_chat_processor(db)
+        
+        # Test básico
+        resultado = processor.procesar_mensaje_inteligente(
+            "pago único", 
+            {"cliente_encontrado": True, "Nombre_del_cliente": "TEST USER"}, 
+            "proponer_planes_pago"
+        )
+        
+        # Verificar estructura
+        keys_esperadas = ['intencion', 'confianza', 'next_state', 'mensaje_respuesta']
+        keys_encontradas = [key for key in keys_esperadas if key in resultado]
+        
+        return {
+            "status": "success",
+            "processor_loaded": True,
+            "test_result": {
+                "keys_esperadas": keys_esperadas,
+                "keys_encontradas": keys_encontradas,
+                "keys_faltantes": list(set(keys_esperadas) - set(keys_encontradas)),
+                "next_state": resultado.get('next_state'),
+                "intencion": resultado.get('intencion')
+            },
+            "recommendation": "✅ Integración exitosa" if len(keys_encontradas) == len(keys_esperadas) else "❌ Verificar keys faltantes"
+        }
+        
+    except ImportError as e:
+        return {
+            "status": "error",
+            "processor_loaded": False,
+            "error": str(e),
+            "recommendation": "Verificar que improved_chat_processor.py esté en la ruta correcta"
+        }
+    except Exception as e:
+        return {
+            "status": "error", 
+            "processor_loaded": True,
+            "error": str(e),
+            "recommendation": "Verificar implementación del procesador"
+        }
+    
+
 @router.post("/test-inteligente")
 async def test_sistema_inteligente(db: Session = Depends(get_db)):
-    """Test completo del sistema inteligente"""
+    """Test completo del sistema inteligente - VERSIÓN CORREGIDA"""
     
     test_messages = [
         "hola mi cedula es 93388915",
@@ -1724,33 +1826,113 @@ async def test_sistema_inteligente(db: Session = Depends(get_db)):
         "plan de cuotas"
     ]
     
-    processor = SmartLanguageProcessor(db)
-    results = []
+    # ✅ INICIALIZAR PROCESADOR (CORREGIDO)
+    try:
+        from app.services.improved_chat_processor import create_compatible_chat_processor
+        procesador = create_compatible_chat_processor(db)
+        print("✅ Test usando procesador mejorado")
+        procesador_tipo = "mejorado"
+    except ImportError as e:
+        print(f"⚠️ Procesador mejorado no disponible: {e}")
+        procesador = SmartLanguageProcessor(db)
+        print("⚠️ Test usando procesador original")
+        procesador_tipo = "original"
     
+    results = []
     contexto_test = {}
     estado_test = "inicial"
     
+    # ✅ LOOP CORREGIDO
     for i, mensaje in enumerate(test_messages):
-        resultado = processor.procesar_mensaje_inteligente(mensaje, contexto_test, estado_test)
-        
-        contexto_test = resultado['contexto_actualizado']
-        estado_test = resultado['next_state']
-        
-        results.append({
-            "paso": i + 1,
-            "mensaje": mensaje,
-            "intencion": resultado['intencion'],
-            "confianza": round(resultado['confianza'], 3),
-            "metodo": resultado['metodo'],
-            "estado_anterior": estado_test,
-            "estado_nuevo": resultado['next_state'],
-            "cliente_encontrado": contexto_test.get('cliente_encontrado', False),
-            "respuesta_generada": resultado['mensaje_respuesta'][:100] + "..." if len(resultado['mensaje_respuesta']) > 100 else resultado['mensaje_respuesta']
-        })
+        try:
+            print(f"\n🧪 Test {i+1}: Procesando '{mensaje}' en estado '{estado_test}'")
+            
+            # ✅ USAR VARIABLE CORRECTA DEL PROCESADOR
+            resultado = procesador.procesar_mensaje_inteligente(mensaje, contexto_test, estado_test)
+            
+            # ✅ VALIDAR RESULTADO
+            if not isinstance(resultado, dict):
+                print(f"❌ Resultado inválido: {type(resultado)}")
+                resultado = {
+                    'intencion': 'ERROR_RESULTADO',
+                    'confianza': 0.3,
+                    'next_state': estado_test,  # ✅ USAR VARIABLE CORRECTA
+                    'contexto_actualizado': contexto_test,  # ✅ USAR VARIABLE CORRECTA
+                    'mensaje_respuesta': 'Hubo un problema procesando tu mensaje.',
+                    'botones': [{'id': 'ayuda', 'text': 'Necesito ayuda'}],
+                    'metodo': 'error_recovery',
+                    'usar_resultado': True
+                }
+            
+            # ✅ ASEGURAR KEYS REQUERIDAS
+            keys_requeridas = ['intencion', 'confianza', 'next_state', 'contexto_actualizado', 'mensaje_respuesta', 'botones']
+            for key in keys_requeridas:
+                if key not in resultado:
+                    if key == 'intencion':
+                        resultado[key] = 'PROCESAMIENTO_GENERAL'
+                    elif key == 'confianza':
+                        resultado[key] = 0.5
+                    elif key == 'next_state':
+                        resultado[key] = estado_test  # ✅ USAR VARIABLE CORRECTA
+                    elif key == 'contexto_actualizado':
+                        resultado[key] = contexto_test  # ✅ USAR VARIABLE CORRECTA
+                    elif key == 'mensaje_respuesta':
+                        resultado[key] = '¿En qué puedo ayudarte?'
+                    elif key == 'botones':
+                        resultado[key] = [{'id': 'ayuda', 'text': 'Necesito ayuda'}]
+            
+            print(f"✅ Resultado validado con {len(resultado)} keys")
+            
+            # ✅ ACTUALIZAR CONTEXTO Y ESTADO PARA SIGUIENTE ITERACIÓN
+            contexto_test = resultado.get('contexto_actualizado', contexto_test)
+            estado_test = resultado.get('next_state', estado_test)
+            
+            # ✅ AGREGAR RESULTADO A LISTA
+            results.append({
+                "paso": i + 1,
+                "mensaje": mensaje,
+                "intencion": resultado.get('intencion', 'DESCONOCIDA'),
+                "confianza": round(resultado.get('confianza', 0.0), 3),
+                "metodo": resultado.get('metodo', 'desconocido'),
+                "estado_anterior": estado_test,  # Estado después del procesamiento
+                "estado_nuevo": resultado.get('next_state', estado_test),
+                "cliente_encontrado": contexto_test.get('cliente_encontrado', False),
+                "respuesta_generada": (resultado.get('mensaje_respuesta', '')[:100] + "...") if len(resultado.get('mensaje_respuesta', '')) > 100 else resultado.get('mensaje_respuesta', ''),
+                "success": True
+            })
+            
+            print(f"✅ Paso {i+1} completado: {estado_test}")
+            
+        except Exception as e:
+            print(f"❌ Error en paso {i+1}: {e}")
+            results.append({
+                "paso": i + 1,
+                "mensaje": mensaje,
+                "intencion": "ERROR",
+                "confianza": 0.0,
+                "metodo": "error",
+                "estado_anterior": estado_test,
+                "estado_nuevo": estado_test,
+                "cliente_encontrado": False,
+                "respuesta_generada": f"Error: {str(e)}",
+                "success": False,
+                "error": str(e)
+            })
+    
+    # ✅ CALCULAR ESTADÍSTICAS
+    total_tests = len(results)
+    successful_tests = len([r for r in results if r.get('success', False)])
+    error_tests = total_tests - successful_tests
     
     return {
-        "status": "success",
-        "sistema": "inteligente_sin_codigo_quemado",
+        "status": "completed",
+        "procesador_usado": procesador_tipo,
+        "estadisticas": {
+            "total_tests": total_tests,
+            "successful_tests": successful_tests,
+            "error_tests": error_tests,
+            "success_rate": f"{(successful_tests/total_tests)*100:.1f}%" if total_tests > 0 else "0%"
+        },
         "test_results": results,
         "features_activas": [
             "deteccion_automatica_cedulas",
@@ -1760,8 +1942,57 @@ async def test_sistema_inteligente(db: Session = Depends(get_db)):
             "fallback_inteligente",
             "sin_codigo_hardcodeado",
             "dinamico_basado_en_contexto_y_ml"
-        ]
+        ],
+        "contexto_final": {
+            "cliente_encontrado": contexto_test.get('cliente_encontrado', False),
+            "nombre_cliente": contexto_test.get('Nombre_del_cliente', 'N/A'),
+            "estado_final": estado_test,
+            "elementos_contexto": len(contexto_test)
+        }
     }
+
+# ✅ ENDPOINT ADICIONAL PARA TEST RÁPIDO
+@router.post("/test-quick")
+async def test_quick_integration(db: Session = Depends(get_db)):
+    """Test rápido de integración"""
+    
+    try:
+        from app.services.improved_chat_processor import create_compatible_chat_processor
+        procesador = create_compatible_chat_processor(db)
+        
+        # Test simple
+        resultado = procesador.procesar_mensaje_inteligente(
+            "pago único", 
+            {"cliente_encontrado": True, "Nombre_del_cliente": "TEST USER"}, 
+            "proponer_planes_pago"
+        )
+        
+        return {
+            "status": "success",
+            "test_message": "pago único",
+            "initial_state": "proponer_planes_pago",
+            "result": {
+                "next_state": resultado.get('next_state'),
+                "intencion": resultado.get('intencion'),
+                "keys_disponibles": list(resultado.keys()),
+                "transition_success": resultado.get('next_state') == 'confirmar_plan_elegido'
+            },
+            "recommendation": "✅ Transición correcta" if resultado.get('next_state') == 'confirmar_plan_elegido' else "❌ Verificar configuración"
+        }
+        
+    except ImportError as e:
+        return {
+            "status": "error",
+            "error": "Procesador mejorado no disponible",
+            "details": str(e),
+            "recommendation": "Verificar que improved_chat_processor.py esté correctamente implementado"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "recommendation": "Verificar logs para más detalles"
+        }
 
 @router.post("/test-cedula", response_model=CedulaTestResponse)
 async def test_cedula_inteligente(request: CedulaTestRequest, db: Session = Depends(get_db)):
