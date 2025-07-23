@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from datetime import datetime
+from app.models.condiciones_inteligentes import CondicionesInteligentes
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class DynamicTransitionService:
         self.keyword_patterns = {}
         self.condition_evaluators = {}
         self.cache_timestamp = 0
-        self.cache_ttl = 300  # 5 minutos
+        self.cache_ttl = 300  
         
         # Cargar configuración inicial
         self._load_configuration()
@@ -325,38 +326,118 @@ class DynamicTransitionService:
             logger.error(f"❌ Error evaluando condición {condition_name}: {e}")
             return False
     
-    def _get_next_state_from_bd(self, current_state: str, condition: str, condition_met: bool) -> str:
-        """Obtener siguiente estado desde BD"""
-        try:
-            query = text("""
-                SELECT 
-                    CASE 
-                        WHEN :condition_met = 1 THEN estado_siguiente_true
-                        ELSE COALESCE(estado_siguiente_false, estado_siguiente_default, :current_state)
-                    END as next_state
-                FROM Estados_Conversacion 
-                WHERE nombre = :current_state 
-                    AND (condicion = :condition OR condicion IS NULL)
-                ORDER BY 
-                    CASE WHEN condicion = :condition THEN 1 ELSE 2 END
-            """)
-            
-            result = self.db.execute(query, {
-                'current_state': current_state,
-                'condition': condition,
-                'condition_met': condition_met
-            }).fetchone()
-            
-            next_state = result[0] if result else current_state
-            
-            if next_state != current_state:
-                logger.info(f"🔄 BD Transition: {current_state} → {next_state} (condición: {condition})")
-            
-            return next_state
-            
-        except Exception as e:
-            logger.error(f"❌ Error obteniendo siguiente estado: {e}")
-            return current_state
+    async def get_next_state_from_bd(
+        db: Session,
+        estado_actual: str,
+        intencion_detectada: str,
+        confianza: float,
+        contexto: dict
+    ) -> Optional[str]:
+        """
+        Determina dinámicamente el próximo estado usando condiciones configuradas en la BD.
+        """
+        condiciones = db.query(CondicionesInteligentes).filter(
+            CondicionesInteligentes.activa == 1,
+            CondicionesInteligentes.estado_actual == estado_actual
+        ).all()
+
+        for condicion in condiciones:
+            nombre = condicion.nombre
+            tipo = condicion.tipo_condicion
+            config = condicion.configuracion_json
+            umbral = condicion.confianza_minima or 0.0
+
+            try:
+                config_dict = json.loads(config)
+            except Exception as e:
+                logger.warning(f"❌ Error cargando configuración de {nombre}: {e}")
+                continue
+
+            cumple = False
+
+            if tipo == "ml_intention":
+                patrones = config_dict.get("patrones", [])
+                umbral_conf = config_dict.get("umbral_confianza", umbral)
+                if intencion_detectada in patrones and confianza >= umbral_conf:
+                    cumple = True
+
+            elif tipo == "context_value":
+                variable = config_dict.get("variable")
+                operador = config_dict.get("operador")
+                valor_esperado = config_dict.get("valor_esperado")
+
+                valor_actual = contexto.get(variable)
+
+                if operador == "equals":
+                    cumple = valor_actual == valor_esperado
+                elif operador == "not_equals":
+                    cumple = valor_actual != valor_esperado
+                elif operador == "not_empty":
+                    cumple = valor_actual is not None and str(valor_actual).strip() != ""
+                elif operador == "contains":
+                    cumple = valor_esperado in str(valor_actual)
+
+            elif tipo == "custom_function":
+                funcion = config_dict.get("funcion")
+                patron = config_dict.get("patron")
+
+                if funcion == "validar_formato_cedula":
+                    import re
+                    valor = contexto.get("documento_cliente", "")
+                    if re.match(patron, valor):
+                        cumple = True
+
+            # Si cumple, retornar el estado_siguiente_true
+            if cumple and condicion.estado_siguiente_true:
+                logger.info(f"✅ Condición {nombre} cumplida → {condicion.estado_siguiente_true}")
+                return condicion.estado_siguiente_true
+
+        # Si ninguna condición se cumplió, buscar estado_siguiente_default
+        for condicion in condiciones:
+            if condicion.estado_siguiente_default:
+                logger.info(f"🔁 Ninguna condición cumplida. Usando default: {condicion.estado_siguiente_default}")
+                return condicion.estado_siguiente_default
+
+        # Si no hay transiciones, permanecer en el estado actual
+        logger.info(f"🌀 No hay transición definida. Permaneciendo en: {estado_actual}")
+        return estado_actual
+
+    def _get_next_state_from_bd(self, estado_actual: str, intencion_detectada: str, contexto_actual: dict):
+        from app.models.condiciones_inteligentes import CondicionesInteligentes
+
+        condiciones = self.db.query(CondicionesInteligentes).filter(
+            CondicionesInteligentes.estado_actual == estado_actual,
+            CondicionesInteligentes.activa == True
+        ).all()
+
+        for condicion in condiciones:
+            tipo = condicion.tipo_condicion
+            config = condicion.configuracion_json
+            estado_true = condicion.estado_siguiente_true or estado_actual
+            estado_default = condicion.estado_siguiente_default or estado_actual
+
+            if tipo == "ml_intention":
+                patrones = config.get("patrones", [])
+                umbral = config.get("umbral_confianza", 0.5)
+                if any(p in intencion_detectada.lower() for p in patrones):
+                    return estado_true
+
+            elif tipo == "context_value":
+                var = config.get("variable")
+                operador = config.get("operador")
+                valor = config.get("valor_esperado")
+                contexto_val = contexto_actual.get(var)
+
+                if operador == "not_empty" and contexto_val:
+                    return estado_true
+                elif operador == "equals" and str(contexto_val) == str(valor):
+                    return estado_true
+
+            elif tipo == "custom_function":
+                # futuro soporte
+                continue
+
+        return estado_default
     
     def _build_result(self, next_state: str, detection_result: Dict[str, Any], 
                      method: str, execution_time: float) -> Dict[str, Any]:
@@ -441,7 +522,7 @@ class DynamicTransitionService:
                 }
             
             return {
-                'service': 'DynamicTransitionService',
+                'service': 'DynamicTransitionService(db=session)',
                 'version': '1.0.0',
                 'configuration': config_stats,
                 'usage_stats': usage_stats,
@@ -450,7 +531,7 @@ class DynamicTransitionService:
             
         except Exception as e:
             return {
-                'service': 'DynamicTransitionService',
+                'service': 'DynamicTransitionService(db=session)',
                 'error': str(e),
                 'configuration': {
                     'ml_mappings_count': len(self.ml_mappings),

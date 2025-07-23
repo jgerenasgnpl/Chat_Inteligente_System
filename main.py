@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 import httpx
 import os
@@ -213,20 +214,84 @@ async def startup_event():
     try:
         print("🚀 Iniciando sistema...")
         
-        # ✅ INICIALIZAR SCHEDULER SOLO SI ESTÁ DISPONIBLE
-        if scheduler_available:
-            if initialize_scheduler() and global_scheduler:
+        # ✅ 1. VERIFICAR BD
+        try:
+            from app.db.session import SessionLocal
+            db = SessionLocal()
+            
+            # Verificar tablas críticas
+            critical_tables = [
+                "Estados_Conversacion",
+                "ml_intention_mappings", 
+                "keyword_condition_patterns"
+            ]
+            
+            for table in critical_tables:
                 try:
-                    global_scheduler.start_scheduler()
-                    print("🚀 Sistema de auto-cierre activado")
+                    result = db.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar()
+                    print(f"✅ {table}: {result} registros")
                 except Exception as e:
-                    print(f"⚠️ Error iniciando scheduler: {e}")
-            else:
-                print("⚠️ Scheduler no se pudo inicializar")
-        else:
-            print("⚠️ Sistema iniciado sin auto-cierre (scheduler no disponible)")
+                    print(f"❌ ERROR CRÍTICO - Tabla {table}: {e}")
+                    # ✅ NO HACER RAISE - SOLO ADVERTIR
+                    print(f"⚠️ Sistema continuará sin tabla {table}")
+            
+            db.close()
+        except Exception as e:
+            print(f"⚠️ Error verificando BD: {e}")
         
-        # ✅ VERIFICAR SERVICIOS CRÍTICOS
+        # ✅ 2. VERIFICAR OPENAI (SIN FALLAR SI NO ESTÁ)
+        try:
+            from app.services.openai_service import openai_cobranza_service
+            if openai_cobranza_service.disponible:
+                print("✅ OpenAI disponible para interpretación inteligente")
+                
+                # ✅ TEST RÁPIDO DE OPENAI
+                test_openai = openai_cobranza_service.test_connection()
+                if test_openai.get('success'):
+                    print("✅ OpenAI test exitoso")
+                else:
+                    print(f"⚠️ OpenAI test falló: {test_openai.get('error')}")
+            else:
+                print("⚠️ OpenAI NO disponible - usando ML básico")
+        except Exception as e:
+            print(f"⚠️ Error verificando OpenAI: {e}")
+        
+        # ✅ 3. TEST SISTEMA DINÁMICO (SIN FALLAR SI NO FUNCIONA)
+        try:
+            from app.services.dynamic_transition_service import create_dynamic_transition_service
+            db = SessionLocal()
+            dynamic_service = create_dynamic_transition_service(db)
+            
+            test_result = dynamic_service.determine_next_state(
+                current_state="proponer_planes_pago",
+                user_message="acepto",
+                ml_result={"intention": "CONFIRMACION_EXITOSA", "confidence": 0.9},
+                context={"cliente_encontrado": True}
+            )
+            
+            if test_result['next_state'] == "confirmar_plan_elegido":
+                print("✅ Sistema dinámico funcionando correctamente")
+            else:
+                print(f"⚠️ Sistema dinámico necesita ajustes: {test_result['next_state']}")
+                
+            db.close()
+        except Exception as e:
+            print(f"⚠️ Error en test dinámico: {e}")
+        
+        # ✅ 4. INICIALIZAR SCHEDULER (SIN FALLAR)
+        try:
+            if scheduler_available:
+                if initialize_scheduler() and global_scheduler:
+                    global_scheduler.start_scheduler()
+                    print("✅ Sistema de auto-cierre activado")
+                else:
+                    print("⚠️ Scheduler no se pudo inicializar")
+            else:
+                print("⚠️ Sistema sin auto-cierre (scheduler no disponible)")
+        except Exception as e:
+            print(f"⚠️ Error iniciando scheduler: {e}")
+        
+        # ✅ 5. VERIFICAR CACHE
         try:
             from app.services.cache_service import cache_service
             stats = cache_service.get_cache_stats()
@@ -234,11 +299,12 @@ async def startup_event():
         except Exception as e:
             print(f"⚠️ Cache service no disponible: {e}")
         
-        print("✅ Sistema iniciado correctamente")
+        print("🎉 Sistema iniciado (verificar advertencias arriba)")
         
     except Exception as e:
+        # ✅ NO HACER RAISE - SOLO LOGEAR
         logger.error(f"Error en startup: {e}")
-        print(f"⚠️ Error en startup: {e}")
+        print(f"⚠️ Error en startup (sistema puede funcionar parcialmente): {e}")
 
 @app.on_event("shutdown") 
 async def shutdown_event():
@@ -466,6 +532,207 @@ async def test_openai_service():
         }
     
 # ✅ ENDPOINT DE DIAGNÓSTICO
+@app.post("/api/v1/admin/test-openai-interpretation")
+async def test_openai_interpretation():
+    """Test específico de interpretación OpenAI"""
+    try:
+        from app.services.improved_chat_processor import create_improved_chat_processor
+        from app.db.session import SessionLocal
+        
+        db = SessionLocal()
+        processor = create_improved_chat_processor(db)
+        
+        # Test con mensaje real del problema
+        test_result = processor.process_message_improved(
+            mensaje="pago unico",
+            contexto={
+                "cliente_encontrado": True,
+                "Nombre_del_cliente": "MARIA ANGELICA",
+                "saldo_total": 4173695,
+                "oferta_2": 784744
+            },
+            estado_actual="proponer_planes_pago"
+        )
+        
+        db.close()
+        
+        return {
+            "test_message": "pago unico",
+            "result": {
+                "next_state": test_result.get('next_state'),
+                "method": test_result.get('metodo'),
+                "ai_enhanced": test_result.get('ai_enhanced', False),
+                "success": test_result.get('next_state') == 'confirmar_plan_elegido'
+            },
+            "openai_integration": "OK" if test_result.get('ai_enhanced') else "Not used"
+        }
+        
+    except Exception as e:
+        return {
+            "error": str(e),
+            "type": type(e).__name__,
+            "recommendation": "Verificar improved_chat_processor.py"
+        }
+
+@app.get("/api/v1/admin/validate-openai-config")
+async def validate_openai_config():
+    """Validar configuración completa de OpenAI"""
+    try:
+        import os
+        
+        # ✅ 1. Verificar API Key
+        api_key = os.getenv("OPENAI_API_KEY")
+        api_key_status = "configured" if api_key else "missing"
+        
+        # ✅ 2. Verificar servicio
+        from app.services.openai_service import openai_cobranza_service
+        service_status = "available" if openai_cobranza_service.disponible else "not_available"
+        
+        # ✅ 3. Test de conexión real
+        connection_test = {"success": False}
+        if openai_cobranza_service.disponible:
+            connection_test = openai_cobranza_service.test_connection()
+        
+        # ✅ 4. Verificar integración en chat processor
+        integration_status = "unknown"
+        try:
+            from app.services.improved_chat_processor import create_improved_chat_processor
+            from app.db.session import SessionLocal
+            
+            db = SessionLocal()
+            processor = create_improved_chat_processor(db)
+            
+            # Verificar si tiene método de OpenAI
+            has_openai_method = hasattr(processor, 'openai_service') and processor.openai_service
+            integration_status = "integrated" if has_openai_method else "not_integrated"
+            
+            db.close()
+            
+        except Exception as e:
+            integration_status = f"error: {e}"
+        
+        # ✅ 5. Recomendaciones
+        recommendations = []
+        
+        if api_key_status == "missing":
+            recommendations.append("Configurar OPENAI_API_KEY en archivo .env")
+        
+        if service_status == "not_available":
+            recommendations.append("Verificar instalación: pip install openai>=1.0.0")
+        
+        if not connection_test.get('success'):
+            recommendations.append("Verificar créditos en OpenAI Dashboard")
+            recommendations.append("Verificar conectividad a internet")
+        
+        if integration_status == "not_integrated":
+            recommendations.append("Verificar que improved_chat_processor use openai_service")
+        
+        return {
+            "api_key": api_key_status,
+            "service": service_status,
+            "connection": connection_test,
+            "integration": integration_status,
+            "recommendations": recommendations,
+            "expected_usage": "80% de mensajes deberían usar OpenAI para interpretación",
+            "status": "OK" if all([
+                api_key_status == "configured",
+                service_status == "available", 
+                connection_test.get('success'),
+                integration_status == "integrated"
+            ]) else "NEEDS_ATTENTION"
+        }
+        
+    except Exception as e:
+        return {
+            "error": str(e),
+            "status": "ERROR"
+        }
+
+@app.post("/api/v1/admin/debug-full-flow")
+async def debug_full_flow():
+    """Debug completo del flujo del problema original"""
+    try:
+        from app.db.session import SessionLocal
+        from app.services.improved_chat_processor import create_improved_chat_processor
+        
+        db = SessionLocal()
+        processor = create_improved_chat_processor(db)
+        
+        # ✅ SIMULAR EL FLUJO EXACTO DEL PROBLEMA
+        debug_steps = []
+        
+        # Contexto del cliente problema
+        contexto = {
+            "cliente_encontrado": True,
+            "Nombre_del_cliente": "MARIA ANGELICA ESCOBAR RODRIGUEZ",
+            "saldo_total": 4173695,
+            "banco": "Scotiabank - Colpatria",
+            "oferta_2": 784744,
+            "hasta_6_cuotas": 626054
+        }
+        
+        # Step 1: Test transición crítica
+        result1 = processor.process_message_improved(
+            mensaje="pago unico",
+            contexto=contexto,
+            estado_actual="proponer_planes_pago"
+        )
+        
+        debug_steps.append({
+            "step": 1,
+            "input": "pago unico",
+            "state": "proponer_planes_pago",
+            "output_state": result1.get('next_state'),
+            "method": result1.get('metodo'),
+            "ai_enhanced": result1.get('ai_enhanced', False),
+            "success": result1.get('next_state') == 'confirmar_plan_elegido',
+            "plan_captured": result1.get('contexto_actualizado', {}).get('plan_capturado', False)
+        })
+        
+        # Step 2: Test con "acepto"
+        result2 = processor.process_message_improved(
+            mensaje="acepto",
+            contexto=contexto,
+            estado_actual="proponer_planes_pago"
+        )
+        
+        debug_steps.append({
+            "step": 2,
+            "input": "acepto",
+            "state": "proponer_planes_pago", 
+            "output_state": result2.get('next_state'),
+            "method": result2.get('metodo'),
+            "ai_enhanced": result2.get('ai_enhanced', False),
+            "success": result2.get('next_state') == 'confirmar_plan_elegido'
+        })
+        
+        db.close()
+        
+        # ✅ EVALUACIÓN GENERAL
+        all_success = all(step['success'] for step in debug_steps)
+        openai_used = any(step['ai_enhanced'] for step in debug_steps)
+        
+        return {
+            "debug_steps": debug_steps,
+            "summary": {
+                "all_transitions_correct": all_success,
+                "openai_interpretation_used": openai_used,
+                "system_status": "WORKING" if all_success else "NEEDS_FIX"
+            },
+            "next_actions": [
+                "Ejecutar SQL de configuración de tablas" if not all_success else "Sistema funcionando",
+                "Verificar OpenAI API Key" if not openai_used else "OpenAI OK",
+                "Probar en frontend" if all_success else "Corregir backend primero"
+            ]
+        }
+        
+    except Exception as e:
+        return {
+            "error": str(e),
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        }
+     
 @app.get("/api/v1/admin/diagnostics")
 async def system_diagnostics():
     """Diagnóstico completo del sistema"""
