@@ -1213,6 +1213,38 @@ async def process_chat_message_OPTIMIZADO(
             logger.info(f"   ✅ PLAN DETECTADO: {contexto_actualizado.get('plan_seleccionado')}")
             logger.info(f"   ✅ MONTO: ${contexto_actualizado.get('monto_acordado', 0):,}")
         
+        def _validar_estado_bd(estado: str) -> str:
+            """Validar que el estado esté permitido en BD"""
+            
+            estados_permitidos = [
+                'inicial', 'validar_documento', 'informar_deuda',
+                'proponer_planes_pago', 'confirmar_plan_elegido', 
+                'generar_acuerdo', 'finalizar_conversacion',
+                'cliente_no_encontrado', 'gestionar_objecion'
+                # 'escalamiento' NO está permitido
+            ]
+            
+            # Mapear estados problemáticos
+            mapeo_estados = {
+                'escalamiento': 'gestionar_objecion',  # ← FIX TEMPORAL
+                'timeout': 'finalizar_conversacion',
+                'error': 'inicial'
+            }
+            
+            if estado in estados_permitidos:
+                return estado
+            elif estado in mapeo_estados:
+                logger.warning(f"🔄 Estado mapeado: {estado} → {mapeo_estados[estado]}")
+                return mapeo_estados[estado]
+            else:
+                logger.warning(f"⚠️ Estado no válido: {estado}, usando 'inicial'")
+                return 'inicial'
+
+        # ✅ USAR EN EL CÓDIGO PRINCIPAL:
+        nuevo_estado = _validar_estado_existente(info['next_state'])
+        nuevo_estado_validado = _validar_estado_bd(nuevo_estado)  # ← AGREGAR ESTA LÍNEA
+        conversation.current_state = nuevo_estado_validado  # ← CAMBIAR ESTA LÍNEA
+
         db.commit()
         logger.info(f"✅ CONTEXTO GUARDADO EN BD")
         

@@ -25,8 +25,7 @@ class OpenAICobranzaService:
         self.client = None
         self.disponible = False
         
-        # ✅ CONFIGURACIÓN PARA 80% DE USO
-        self.USE_OPENAI_PERCENTAGE = 80  # 80% de los casos usarán OpenAI
+        self.USE_OPENAI_PERCENTAGE = 90  
         self.MIN_CONFIDENCE_THRESHOLD = 0.3  # Umbral mínimo para activar OpenAI
         
         # ✅ PROMPTS ESPECIALIZADOS EN COBRANZA

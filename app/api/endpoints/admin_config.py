@@ -19,6 +19,101 @@ router = APIRouter(
     tags=["administracion"]
 )
 
+@router.get("/verificar-sistema-dinamico")
+async def verificar_sistema_dinamico(db: Session = Depends(get_db)):
+    """Verificar que el sistema sea 100% dinámico"""
+    
+    verificaciones = {
+        "templates_bd": False,
+        "estados_bd": False, 
+        "ml_mappings_bd": False,
+        "keywords_bd": False,
+        "variables_dinamicas": False
+    }
+    
+    try:
+        # 1. Verificar templates en Estados_conversacion
+        query1 = text("SELECT COUNT(*) FROM Estados_conversacion WHERE mensaje_template IS NOT NULL AND activo = 1")
+        templates_count = db.execute(query1).scalar()
+        verificaciones["templates_bd"] = templates_count > 5
+        
+        # 2. Verificar mapeos ML
+        query2 = text("SELECT COUNT(*) FROM ml_intention_mappings WHERE active = 1")
+        ml_count = db.execute(query2).scalar()
+        verificaciones["ml_mappings_bd"] = ml_count > 10
+        
+        # 3. Verificar keywords
+        query3 = text("SELECT COUNT(*) FROM keyword_condition_patterns WHERE active = 1")
+        keywords_count = db.execute(query3).scalar()
+        verificaciones["keywords_bd"] = keywords_count > 15
+        
+        # 4. Test de resolución de variables
+        from app.services.variable_service import crear_variable_service
+        var_service = crear_variable_service(db)
+        test_template = "Hola {{Nombre_del_cliente}}, tu saldo es {{saldo_total}}"
+        test_context = {"Nombre_del_cliente": "TEST", "saldo_total": 1000}
+        resolved = var_service.resolver_variables(test_template, test_context)
+        verificaciones["variables_dinamicas"] = "TEST" in resolved and "1000" in resolved
+        
+        return {
+            "sistema_dinamico": all(verificaciones.values()),
+            "verificaciones": verificaciones,
+            "recomendacion": "✅ Sistema 100% dinámico" if all(verificaciones.values()) else "⚠️ Algunas partes siguen hardcodeadas"
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+    
+@router.post("/fix-estados-constraint")
+async def fix_estados_constraint(db: Session = Depends(get_db)):
+    """Agregar estados faltantes al CHECK constraint"""
+    try:
+        # 1. Verificar estados actuales permitidos
+        check_query = text("""
+            SELECT CHECK_CLAUSE 
+            FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS 
+            WHERE CONSTRAINT_NAME = 'CHK_valid_state_updated'
+        """)
+        
+        result = db.execute(check_query).fetchone()
+        
+        if result:
+            current_constraint = result[0]
+            
+            # 2. Estados que deben estar permitidos
+            estados_requeridos = [
+                'inicial', 'validar_documento', 'informar_deuda',
+                'proponer_planes_pago', 'confirmar_plan_elegido', 
+                'generar_acuerdo', 'finalizar_conversacion',
+                'cliente_no_encontrado', 'gestionar_objecion', 
+                'escalamiento'  # ← Este falta
+            ]
+            
+            # 3. Construir nuevo constraint
+            estados_sql = "', '".join(estados_requeridos)
+            new_constraint = f"[current_state] IN ('{estados_sql}')"
+            
+            # 4. Actualizar constraint
+            drop_query = text("ALTER TABLE conversations DROP CONSTRAINT CHK_valid_state_updated")
+            add_query = text(f"ALTER TABLE conversations ADD CONSTRAINT CHK_valid_state_updated CHECK ({new_constraint})")
+            
+            db.execute(drop_query)
+            db.execute(add_query)
+            db.commit()
+            
+            return {
+                "success": True,
+                "constraint_anterior": current_constraint,
+                "constraint_nuevo": new_constraint,
+                "estados_agregados": ["escalamiento"]
+            }
+        
+        return {"success": False, "error": "Constraint no encontrado"}
+        
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+
 @router.get("/estados")
 def listar_estados_completo(db: Session = Depends(get_db)):
     try:
