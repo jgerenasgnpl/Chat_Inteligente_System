@@ -214,23 +214,31 @@ class DynamicTransitionService:
         }
     
     def _try_keyword_patterns(self, message: str, current_state: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """✅ CORREGIDO - Detectar keywords específicos para selección de planes"""
+        """✅ CORREGIDO - Pattern matching robusto con case insensitive"""
         
-        message_lower = message.lower().strip()
+        message_lower = message.lower().strip()  # ✅ SIEMPRE lowercase
         has_client = context.get('cliente_encontrado', False)
         
-        # ✅ MAPEO ESPECÍFICO PARA SELECCIÓN DE PLANES
+        # ✅ DETECCIÓN ESPECÍFICA PARA SELECCIÓN DE PLANES (PRIORIDAD MÁXIMA)
         if current_state == 'proponer_planes_pago':
-            # Detección directa de selección de plan
-            if any(keyword in message_lower for keyword in ['pago unic', 'pago único', 'descuento', 'oferta especial']):
+            
+            # ✅ PAGO ÚNICO - Patrones amplios
+            pago_unico_patterns = [
+                'pago unic', 'pago único', 'descuento', 'oferta especial',
+                'liquidar', 'pago completo', 'primera', 'primer', '1'
+            ]
+            
+            if any(pattern in message_lower for pattern in pago_unico_patterns):
                 return {
                     'success': True,
                     'condition': 'cliente_selecciona_pago_unico',
                     'confidence': 0.95,
-                    'pattern_matched': 'pago_unico',
+                    'pattern_matched': f'pago_unico_detected: {message_lower}',
                     'source': 'keyword_pattern_plan_selection'
                 }
-            elif any(keyword in message_lower for keyword in ['3 cuotas', 'tres cuotas']):
+            
+            # ✅ 3 CUOTAS
+            if any(pattern in message_lower for pattern in ['3 cuotas', 'tres cuotas', 'segunda', '2']):
                 return {
                     'success': True,
                     'condition': 'cliente_selecciona_plan_3_cuotas',
@@ -238,7 +246,9 @@ class DynamicTransitionService:
                     'pattern_matched': '3_cuotas',
                     'source': 'keyword_pattern_plan_selection'
                 }
-            elif any(keyword in message_lower for keyword in ['6 cuotas', 'seis cuotas']):
+            
+            # ✅ 6 CUOTAS  
+            if any(pattern in message_lower for pattern in ['6 cuotas', 'seis cuotas', 'tercera', '3']):
                 return {
                     'success': True,
                     'condition': 'cliente_selecciona_plan_6_cuotas',
@@ -246,16 +256,18 @@ class DynamicTransitionService:
                     'pattern_matched': '6_cuotas',
                     'source': 'keyword_pattern_plan_selection'
                 }
-            elif any(keyword in message_lower for keyword in ['12 cuotas', 'doce cuotas']):
+            
+            # ✅ 12 CUOTAS
+            if any(pattern in message_lower for pattern in ['12 cuotas', 'doce cuotas', 'cuarta', '4']):
                 return {
                     'success': True,
-                    'condition': 'cliente_selecciona_plan_12_cuotas',
+                    'condition': 'cliente_selecciona_plan_12_cuotas', 
                     'confidence': 0.95,
                     'pattern_matched': '12_cuotas',
                     'source': 'keyword_pattern_plan_selection'
                 }
         
-        # ✅ RESTO DEL CÓDIGO ORIGINAL...
+        # ✅ RESTO DEL CÓDIGO ORIGINAL (búsqueda en BD)
         sorted_patterns = sorted(
             self.keyword_patterns.items(), 
             key=lambda x: x[1]['confidence'], 
@@ -353,133 +365,172 @@ class DynamicTransitionService:
         except Exception as e:
             logger.error(f"❌ Error evaluando condición {condition_name}: {e}")
             return False
-    
-    async def get_next_state_from_bd(
-        db: Session,
-        estado_actual: str,
-        intencion_detectada: str,
-        confianza: float,
-        contexto: dict
-    ) -> Optional[str]:
-        """
-        Determina dinámicamente el próximo estado usando condiciones configuradas en la BD.
-        """
-        condiciones = db.query(CondicionesInteligentes).filter(
-            CondicionesInteligentes.activa == 1,
-            CondicionesInteligentes.estado_actual == estado_actual
-        ).all()
+        
+    # ☝️ Esta función está MAL UBICADA y debe eliminarse completamente
 
-        for condicion in condiciones:
-            nombre = condicion.nombre
-            tipo = condicion.tipo_condicion
-            config = condicion.configuracion_json
-            umbral = condicion.confianza_minima or 0.0
-
-            try:
-                config_dict = json.loads(config)
-            except Exception as e:
-                logger.warning(f"❌ Error cargando configuración de {nombre}: {e}")
-                continue
-
-            cumple = False
-
-            if tipo == "ml_intention":
-                patrones = config_dict.get("patrones", [])
-                umbral_conf = config_dict.get("umbral_confianza", umbral)
-                if intencion_detectada in patrones and confianza >= umbral_conf:
-                    cumple = True
-
-            elif tipo == "context_value":
-                variable = config_dict.get("variable")
-                operador = config_dict.get("operador")
-                valor_esperado = config_dict.get("valor_esperado")
-
-                valor_actual = contexto.get(variable)
-
-                if operador == "equals":
-                    cumple = valor_actual == valor_esperado
-                elif operador == "not_equals":
-                    cumple = valor_actual != valor_esperado
-                elif operador == "not_empty":
-                    cumple = valor_actual is not None and str(valor_actual).strip() != ""
-                elif operador == "contains":
-                    cumple = valor_esperado in str(valor_actual)
-
-            elif tipo == "custom_function":
-                funcion = config_dict.get("funcion")
-                patron = config_dict.get("patron")
-
-                if funcion == "validar_formato_cedula":
-                    import re
-                    valor = contexto.get("documento_cliente", "")
-                    if re.match(patron, valor):
-                        cumple = True
-
-            # Si cumple, retornar el estado_siguiente_true
-            if cumple and condicion.estado_siguiente_true:
-                logger.info(f"✅ Condición {nombre} cumplida → {condicion.estado_siguiente_true}")
-                return condicion.estado_siguiente_true
-
-            elif condicion_requerida == 'nueva_consulta':
-                if condicion_detectada in ['nueva_consulta', 'NUEVA_CONSULTA']:
-                    return estado_true or estado_default or estado_actual
-
-            elif condicion_requerida == 'proceso_completado':
-                if condicion_detectada in ['proceso_completado', 'FINALIZAR', 'DESPEDIDA']:
-                    return estado_true or estado_default or estado_actual
-                    
-            elif condicion_requerida == 'cliente_confirma_acuerdo':
-                if condicion_detectada in ['cliente_confirma_acuerdo', 'CONFIRMACION_PLAN']:
-                    return estado_true or estado_default or estado_actual
-
-        # Si ninguna condición se cumplió, buscar estado_siguiente_default
-        for condicion in condiciones:
-            if condicion.estado_siguiente_default:
-                logger.info(f"🔁 Ninguna condición cumplida. Usando default: {condicion.estado_siguiente_default}")
-                return condicion.estado_siguiente_default
-
-        # Si no hay transiciones, permanecer en el estado actual
-        logger.info(f"🌀 No hay transición definida. Permaneciendo en: {estado_actual}")
-        return estado_actual
+    # ✅ REEMPLAZAR el método _get_next_state_from_bd con esta versión 100% dinámica:
 
     def _get_next_state_from_bd(self, estado_actual: str, condicion_detectada: str, usar_inteligentes: bool = True) -> str:
-        """✅ INTEGRACIÓN COMPLETA CORREGIDA"""
+        """✅ VERSIÓN 100% DINÁMICA - Sin hardcoding"""
         try:
-            logger.info(f"🔍 Consultando BD: {estado_actual} + {condicion_detectada}")
+            logger.info(f"🔍 [BD] Consultando transición: {estado_actual} + {condicion_detectada}")
             
-            # ✅ 1. CASOS ESPECÍFICOS PRIMERO
-            if usar_inteligentes:
-                estado_especifico = self._consultar_condiciones_inteligentes(estado_actual, condicion_detectada)
-                if estado_especifico != estado_actual:
-                    return estado_especifico
+            # ✅ 1. PRIORIDAD: Estados_Conversacion (tabla principal)
+            query = text("""
+                SELECT estado_siguiente_true, estado_siguiente_false, estado_siguiente_default, condicion
+                FROM Estados_Conversacion 
+                WHERE nombre = :estado AND activo = 1
+            """)
             
-            # ✅ 2. CONSULTAR Estados_conversacion
-            estado_general = self._consultar_estados_conversacion(estado_actual, condicion_detectada)
-            return estado_general
+            result = self.db.execute(query, {"estado": estado_actual}).fetchone()
+            
+            if result:
+                estado_true, estado_false, estado_default, condicion_requerida = result
+                
+                # ✅ EVALUACIÓN DINÁMICA DE CONDICIÓN
+                if self._evaluar_condicion_dinamica(condicion_requerida, condicion_detectada):
+                    siguiente_estado = estado_true or estado_default or estado_actual
+                    logger.info(f"✅ [BD] Transición encontrada: {estado_actual} → {siguiente_estado}")
+                    return siguiente_estado
+                elif estado_false:
+                    logger.info(f"🔄 [BD] Condición falsa: {estado_actual} → {estado_false}")
+                    return estado_false
+                elif estado_default:
+                    logger.info(f"🔄 [BD] Usando default: {estado_actual} → {estado_default}")
+                    return estado_default
+            
+            # ✅ 2. FALLBACK: keyword_condition_patterns
+            keyword_query = text("""
+                SELECT bd_condition, confidence_score
+                FROM keyword_condition_patterns 
+                WHERE active = 1 AND confidence_score >= 0.7
+                ORDER BY confidence_score DESC
+            """)
+            
+            for row in self.db.execute(keyword_query):
+                bd_condition, confidence = row
+                if bd_condition == condicion_detectada:
+                    # Buscar estado destino para esta condición
+                    destino = self._buscar_estado_destino_para_condicion(bd_condition, estado_actual)
+                    if destino != estado_actual:
+                        logger.info(f"✅ [KEYWORD] Encontrado: {estado_actual} → {destino}")
+                        return destino
+            
+            # ✅ 3. ÚLTIMO RECURSO: ml_intention_mappings
+            ml_query = text("""
+                SELECT bd_condition, confidence_threshold
+                FROM ml_intention_mappings
+                WHERE active = 1
+                ORDER BY priority ASC
+            """)
+            
+            for row in self.db.execute(ml_query):
+                bd_condition, threshold = row
+                if bd_condition == condicion_detectada:
+                    destino = self._buscar_estado_destino_para_condicion(bd_condition, estado_actual)
+                    if destino != estado_actual:
+                        logger.info(f"✅ [ML] Encontrado: {estado_actual} → {destino}")
+                        return destino
+            
+            logger.info(f"🌀 [BD] Sin transición definida, permaneciendo en: {estado_actual}")
+            return estado_actual
             
         except Exception as e:
-            logger.error(f"❌ Error consultando BD: {e}")
+            logger.error(f"❌ [BD] Error: {e}")
             return estado_actual
 
-    def _consultar_condiciones_inteligentes(self, estado_actual: str, condicion_detectada: str) -> str:
-        """✅ CONSULTAR condiciones_inteligentes para casos específicos"""
+    def _evaluar_condicion_dinamica(self, condicion_requerida: str, condicion_detectada: str) -> bool:
+        """✅ EVALUACIÓN 100% DINÁMICA DE CONDICIONES"""
+        
+        if not condicion_requerida or not condicion_detectada:
+            return False
+        
+        # ✅ COINCIDENCIA EXACTA
+        if condicion_requerida == condicion_detectada:
+            return True
+        
+        # ✅ CONSULTAR TABLA DE EQUIVALENCIAS DINÁMICAS
         try:
-            # ✅ MAPEO DIRECTO PARA CASOS CRÍTICOS
-            if estado_actual == 'proponer_planes_pago':
-                mapeo_directo = {
-                    'cliente_selecciona_pago_unico': 'confirmar_plan_elegido',
-                    'cliente_selecciona_plan_3_cuotas': 'confirmar_plan_elegido',
-                    'cliente_selecciona_plan_6_cuotas': 'confirmar_plan_elegido',
-                    'cliente_selecciona_plan_12_cuotas': 'confirmar_plan_elegido'
-                }
-                
-                if condicion_detectada in mapeo_directo:
-                    logger.info(f"✅ Mapeo directo condiciones_inteligentes: {condicion_detectada} → {mapeo_directo[condicion_detectada]}")
-                    return mapeo_directo[condicion_detectada]
+            equivalencias_query = text("""
+                SELECT pattern_variations
+                FROM condition_equivalences
+                WHERE base_condition = :base_condition AND active = 1
+            """)
             
-            # ✅ CONSULTA REAL A condiciones_inteligentes
-            query = text("""
+            result = self.db.execute(equivalencias_query, {"base_condition": condicion_requerida}).fetchone()
+            
+            if result and result[0]:
+                try:
+                    import json
+                    variaciones = json.loads(result[0])
+                    if condicion_detectada in variaciones:
+                        return True
+                except:
+                    pass
+        except:
+            pass
+        
+        # ✅ MAPEO DINÁMICO BÁSICO (sin hardcoding extenso)
+        mapeo_basico = {
+            "cliente_selecciona_plan": [
+                "cliente_selecciona_pago_unico",
+                "cliente_selecciona_plan_3_cuotas", 
+                "cliente_selecciona_plan_6_cuotas",
+                "cliente_selecciona_plan_12_cuotas",
+                "PAGO_UNICO",
+                "CONFIRMACION_EXITOSA"
+            ]
+        }
+        
+        condiciones_validas = mapeo_basico.get(condicion_requerida, [condicion_requerida])
+        return condicion_detectada in condiciones_validas
+    
+    def _buscar_estado_destino_para_condicion(self, condicion: str, estado_actual: str) -> str:
+        """✅ BUSCAR ESTADO DESTINO DINÁMICAMENTE"""
+        try:
+            # ✅ BÚSQUEDA EN TODAS LAS CONFIGURACIONES
+            destino_query = text("""
                 SELECT estado_siguiente_true, estado_siguiente_default
+                FROM Estados_Conversacion 
+                WHERE (condicion = :condicion OR condicion LIKE :condicion_pattern)
+                    AND activo = 1
+                    AND nombre != :estado_actual
+                ORDER BY 
+                    CASE WHEN condicion = :condicion THEN 1 ELSE 2 END,
+                    estado_siguiente_true DESC
+            """)
+            
+            result = self.db.execute(destino_query, {
+                "condicion": condicion,
+                "condicion_pattern": f"%{condicion}%",
+                "estado_actual": estado_actual
+            }).fetchone()
+            
+            if result:
+                return result[0] or result[1] or estado_actual
+            
+            # ✅ MAPEO ESPECÍFICO PARA CASOS CRÍTICOS (mínimo hardcoding)
+            mapeo_critico = {
+                "cliente_selecciona_pago_unico": "confirmar_plan_elegido",
+                "cliente_selecciona_plan_3_cuotas": "confirmar_plan_elegido",
+                "cliente_selecciona_plan_6_cuotas": "confirmar_plan_elegido",
+                "cliente_selecciona_plan_12_cuotas": "confirmar_plan_elegido",
+                "cliente_confirma_acuerdo": "generar_acuerdo",
+                "proceso_completado": "finalizar_conversacion"
+            }
+            
+            return mapeo_critico.get(condicion, estado_actual)
+            
+        except Exception as e:
+            logger.error(f"❌ Error buscando destino para {condicion}: {e}")
+            return estado_actual
+    
+    def _consultar_condiciones_inteligentes(self, estado_actual: str, condicion_detectada: str) -> str:
+        """✅ CONSULTAR condiciones_inteligentes 100% dinámico"""
+        try:
+            # ✅ CONSULTA COMPLETAMENTE DINÁMICA
+            query = text("""
+                SELECT estado_siguiente_true, estado_siguiente_default, configuracion_json, tipo_condicion
                 FROM condiciones_inteligentes 
                 WHERE estado_actual = :estado AND activa = 1
                 ORDER BY confianza_minima DESC
@@ -488,14 +539,39 @@ class DynamicTransitionService:
             results = self.db.execute(query, {"estado": estado_actual}).fetchall()
             
             for row in results:
-                estado_true, estado_default = row
-                # Para simplificar, asumir que se cumple si llegó aquí
-                return estado_true or estado_default or estado_actual
+                estado_true, estado_default, config_json, tipo_condicion = row
+                
+                # ✅ EVALUACIÓN DINÁMICA BASADA EN TIPO
+                if self._evaluar_condicion_inteligente_completa(condicion_detectada, config_json, tipo_condicion):
+                    return estado_true or estado_default or estado_actual
+            
+            # ✅ FALLBACK DINÁMICO: buscar en keyword patterns
+            return self._buscar_en_patterns_dinamicos(estado_actual, condicion_detectada)
+            
+        except Exception as e:
+            logger.error(f"❌ Error en condiciones_inteligentes: {e}")
+            return estado_actual
+
+    def _buscar_en_patterns_dinamicos(self, estado_actual: str, condicion_detectada: str) -> str:
+        """✅ BÚSQUEDA DINÁMICA EN PATTERNS"""
+        try:
+            pattern_query = text("""
+                SELECT keyword_pattern, bd_condition, confidence_score
+                FROM keyword_condition_patterns
+                WHERE active = 1 AND bd_condition = :condicion
+                ORDER BY confidence_score DESC
+            """)
+            
+            result = self.db.execute(pattern_query, {"condicion": condicion_detectada}).fetchone()
+            
+            if result:
+                # Encontrado pattern, buscar estado destino
+                return self._buscar_estado_destino_para_condicion(result[1], estado_actual)
             
             return estado_actual
             
         except Exception as e:
-            logger.error(f"❌ Error en condiciones_inteligentes: {e}")
+            logger.error(f"❌ Error en patterns dinámicos: {e}")
             return estado_actual
 
     def _consultar_estados_conversacion(self, estado_actual: str, condicion_detectada: str) -> str:

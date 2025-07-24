@@ -19,6 +19,143 @@ router = APIRouter(
     tags=["administracion"]
 )
 
+@router.post("/validate-dynamic-system")
+async def validate_dynamic_system(db: Session = Depends(get_db)):
+    """✅ VALIDACIÓN COMPLETA DEL SISTEMA 100% DINÁMICO"""
+    
+    validation_results = {
+        "database_tables": {},
+        "critical_issues": [],
+        "system_score": 0
+    }
+    
+    try:
+        # Verificar tablas críticas
+        critical_tables = ["Estados_Conversacion", "keyword_condition_patterns", "ml_intention_mappings"]
+        
+        for table in critical_tables:
+            try:
+                count_query = text(f"SELECT COUNT(*) FROM {table} WHERE activo = 1 OR active = 1")
+                count = db.execute(count_query).scalar()
+                
+                validation_results["database_tables"][table] = {
+                    "active_records": count,
+                    "status": "OK" if count > 0 else "EMPTY"
+                }
+                
+                if count == 0:
+                    validation_results["critical_issues"].append(f"Tabla {table} sin registros activos")
+                    
+            except Exception as e:
+                validation_results["critical_issues"].append(f"Tabla {table} no accesible: {e}")
+        
+        # Test crítico de transición
+        from app.services.dynamic_transition_service import create_dynamic_transition_service
+        dynamic_service = create_dynamic_transition_service(db)
+        
+        test_result = dynamic_service.determine_next_state(
+            current_state="proponer_planes_pago",
+            user_message="pago unico",
+            ml_result={"intention": "PAGO_UNICO", "confidence": 0.9},
+            context={"cliente_encontrado": True}
+        )
+        
+        critical_test_passed = test_result['next_state'] == 'confirmar_plan_elegido'
+        
+        if not critical_test_passed:
+            validation_results["critical_issues"].append(
+                f"Test crítico falló: esperado 'confirmar_plan_elegido', obtuvo '{test_result['next_state']}'"
+            )
+        
+        # Calcular score
+        validation_results["system_score"] = 100 if len(validation_results["critical_issues"]) == 0 else 50
+        
+        return {
+            "success": True,
+            "validation_results": validation_results,
+            "system_status": "HEALTHY" if validation_results["system_score"] >= 80 else "NEEDS_ATTENTION",
+            "critical_test_passed": critical_test_passed
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/fix-dynamic-system")
+async def fix_dynamic_system(db: Session = Depends(get_db)):
+    """✅ AUTO-CORRECCIÓN DEL SISTEMA DINÁMICO"""
+    
+    fixes_applied = []
+    errors = []
+    
+    try:
+        # Corregir Estados_Conversacion críticos
+        critical_fixes = [
+            ("proponer_planes_pago", "cliente_selecciona_plan", "confirmar_plan_elegido"),
+            ("confirmar_plan_elegido", "cliente_confirma_acuerdo", "generar_acuerdo")
+        ]
+        
+        for estado, condicion, estado_siguiente in critical_fixes:
+            update_query = text("""
+                UPDATE Estados_Conversacion 
+                SET estado_siguiente_true = :estado_siguiente,
+                    condicion = :condicion
+                WHERE nombre = :estado AND activo = 1
+            """)
+            
+            result = db.execute(update_query, {
+                "estado": estado,
+                "condicion": condicion, 
+                "estado_siguiente": estado_siguiente
+            })
+            
+            if result.rowcount > 0:
+                fixes_applied.append(f"Estado {estado} corregido")
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "fixes_applied": fixes_applied,
+            "total_fixes": len(fixes_applied)
+        }
+        
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+
+@router.get("/dynamic-system-status")
+async def get_dynamic_system_status(db: Session = Depends(get_db)):
+    """✅ STATUS RÁPIDO DEL SISTEMA DINÁMICO"""
+    try:
+        # Contar registros en tablas críticas
+        estados_count = db.execute(text("SELECT COUNT(*) FROM Estados_Conversacion WHERE activo = 1")).scalar()
+        keywords_count = db.execute(text("SELECT COUNT(*) FROM keyword_condition_patterns WHERE active = 1")).scalar()
+        
+        # Test crítico
+        from app.services.dynamic_transition_service import create_dynamic_transition_service
+        dynamic_service = create_dynamic_transition_service(db)
+        
+        test_result = dynamic_service.determine_next_state(
+            current_state="proponer_planes_pago",
+            user_message="pago unico", 
+            ml_result={"intention": "PAGO_UNICO", "confidence": 0.9},
+            context={"cliente_encontrado": True}
+        )
+        
+        critical_test_passed = test_result['next_state'] == 'confirmar_plan_elegido'
+        
+        return {
+            "tables_status": {
+                "Estados_Conversacion": estados_count,
+                "keyword_condition_patterns": keywords_count
+            },
+            "critical_test_passed": critical_test_passed,
+            "system_health": "HEALTHY" if critical_test_passed else "DEGRADED"
+        }
+        
+    except Exception as e:
+        return {"system_health": "ERROR", "error": str(e)}
+
 @router.get("/verificar-sistema-dinamico")
 async def verificar_sistema_dinamico(db: Session = Depends(get_db)):
     """Verificar que el sistema sea 100% dinámico"""
