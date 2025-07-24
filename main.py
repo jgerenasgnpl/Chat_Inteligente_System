@@ -536,14 +536,14 @@ async def test_openai_service():
 async def test_openai_interpretation():
     """Test específico de interpretación OpenAI"""
     try:
-        from app.services.improved_chat_processor import create_improved_chat_processor
+        from app.services.conversation_service import crear_conversation_service
         from app.db.session import SessionLocal
         
         db = SessionLocal()
-        processor = create_improved_chat_processor(db)
+        processor = crear_conversation_service(db)
         
         # Test con mensaje real del problema
-        test_result = processor.process_message_improved(
+        test_result = await processor.process_message(
             mensaje="pago unico",
             contexto={
                 "cliente_encontrado": True,
@@ -596,11 +596,11 @@ async def validate_openai_config():
         # ✅ 4. Verificar integración en chat processor
         integration_status = "unknown"
         try:
-            from app.services.improved_chat_processor import create_improved_chat_processor
+            from app.services.conversation_service import crear_conversation_service
             from app.db.session import SessionLocal
             
             db = SessionLocal()
-            processor = create_improved_chat_processor(db)
+            processor = crear_conversation_service(db)
             
             # Verificar si tiene método de OpenAI
             has_openai_method = hasattr(processor, 'openai_service') and processor.openai_service
@@ -653,10 +653,10 @@ async def debug_full_flow():
     """Debug completo del flujo del problema original"""
     try:
         from app.db.session import SessionLocal
-        from app.services.improved_chat_processor import create_improved_chat_processor
+        from app.services.conversation_service import crear_conversation_service
         
         db = SessionLocal()
-        processor = create_improved_chat_processor(db)
+        processor = crear_conversation_service(db)
         
         # ✅ SIMULAR EL FLUJO EXACTO DEL PROBLEMA
         debug_steps = []
